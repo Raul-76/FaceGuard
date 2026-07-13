@@ -32,7 +32,7 @@ O Dashboard (localizado na pasta `dashboard`) é uma interface moderna construí
 
 <!-- 📸 Print do Dashboard -->
 <p align="center">
-  <img src="./dashboard/preview.png" alt="Print do Dashboard FaceGuard" width="700"/>
+  <img src="dashboard/dashboard preview.jpg" alt="Print do Dashboard FaceGuard" width="700"/>
 </p>
 
 ### Funcionalidades Principais
