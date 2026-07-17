@@ -133,4 +133,3 @@ FaceGuard/
 Desenvolvido como projeto de monitoramento e controle de acesso local via hardware embarcado + Web.
 
 
-teste
