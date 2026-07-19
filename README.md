@@ -124,7 +124,7 @@ FaceGuard/
 
 | Integrante | Responsabilidade | GitHub | Contato |
 |---|---|---|---|
-| **Raul Santos** | Desenvolvimento Front-End — construção do Dashboard do FaceGuard | [@Raul-76](https://github.com/Raul-76) | [Email](cguimaraes03@gmail.com) |
+| **Raul Jesus dos Santos** | Desenvolvimento Front-End — construção do Dashboard do FaceGuard | [@Raul-76](https://github.com/Raul-76) | [Email](cguimaraes03@gmail.com) |
 | **Carlos Eduardo Guimarães** | Modelagem 3D do case da câmera/sistema | [@VoIkmer](https://github.com/VoIkmer) | [Email](caio.mpmazza@gmail.com) |
 | **Caio Marcelo Mazza** | Back-End — firmware do ESP32 (câmera) e montagem do modelo computacional de reconhecimento facial | [@Caiompmazza](https://github.com/caiompmazza) | [Email](caio.mpmazza@gmail.com) |
 
