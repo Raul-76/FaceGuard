@@ -19,11 +19,12 @@
 #include <eloquent_esp32cam/face/recognition.h>
 
 #include <WiFi.h>
-#include <esp_http_server.h>   // servidor HTTP nativo do IDF (mais leve que WebServer.h)
-#include <math.h>              // sin() do pulso do LED
+#include <esp_http_server.h> // servidor HTTP nativo do IDF (mais leve que WebServer.h)
+#include <math.h>            // sin() do pulso do LED
 
-#include "esp_sleep.h"         // deep sleep
-#include "driver/rtc_io.h"     // pull-up no dominio RTC (sobrevive ao sono)
+#include "driver/rtc_io.h" // pull-up no dominio RTC (sobrevive ao sono)
+#include "esp_sleep.h"     // deep sleep
+
 
 using eloq::camera;
 using eloq::face::detection;
@@ -33,14 +34,14 @@ using eloq::face::recognition;
 // LED azul saiu do GPIO14 (que virou o switch de sono) e foi pro 47.
 // (K) LED VERDE saiu do GPIO2 e foi pro 48, liberando o 2 para o LDR.
 const int pinoVermelho = 1;
-const int pinoVerde    = 48;   // (K) ERA 2 -- movido para liberar o ADC1
-const int pinoAzul     = 47;
-const int pinoBuzzer   = 41;
-const int pinoLuz      = 42;   // gate do MOSFET que aciona o COB
+const int pinoVerde = 48; // (K) ERA 2 -- movido para liberar o ADC1
+const int pinoAzul = 47;
+const int pinoBuzzer = 41;
+const int pinoLuz = 42; // gate do MOSFET que aciona o COB
 
 // (J) FOTORRESISTOR: GPIO 2 = ADC1_CH1.
 // TEM que ser ADC1 (GPIO 1..10 no S3): o ADC2 nao funciona com WiFi ligado.
-const int pinoLDR      = 2;
+const int pinoLDR = 2;
 
 // ==================== CONTROLE DE ILUMINACAO (J) ====================
 // A realimentacao agora usa o LDR. Divisor de tensao sugerido:
@@ -54,16 +55,16 @@ const int pinoLDR      = 2;
 // CALIBRACAO OBRIGATORIA: rode o comando 'l' e anote a leitura crua no seu
 // ambiente. Os valores abaixo sao ponto de partida, nao verdade absoluta --
 // dependem do LDR, do resistor e da luz do local.
-const int LDR_ALVO     = 2000;  // leitura desejada (0..4095)
-const int BANDA_MORTA  = 150;   // nao mexe se estiver perto do alvo.
-                                // Sem banda morta o controle OSCILA em torno
-                                // do setpoint, e luz piscando estraga a
-                                // consistencia dos embeddings.
-const int DUTY_MIN     = 10;    // nunca apaga de vez durante a operacao
-const int DUTY_MAX     = 255;
-const int PASSO_DUTY   = 2;     // ajuste INCREMENTAL, nao proporcional:
-                                // mover pouco por vez tambem evita oscilacao
-int dutyLuz = 30;              // ponto de partida
+const int LDR_ALVO = 2000;   // leitura desejada (0..4095)
+const int BANDA_MORTA = 150; // nao mexe se estiver perto do alvo.
+                             // Sem banda morta o controle OSCILA em torno
+                             // do setpoint, e luz piscando estraga a
+                             // consistencia dos embeddings.
+const int DUTY_MIN = 10;     // nunca apaga de vez durante a operacao
+const int DUTY_MAX = 255;
+const int PASSO_DUTY = 2; // ajuste INCREMENTAL, nao proporcional:
+                          // mover pouco por vez tambem evita oscilacao
+int dutyLuz = 30;         // ponto de partida
 
 // Botao momentaneo que dispara uma tentativa de reconhecimento.
 const int iniciarReconhecimento = 21;
@@ -85,66 +86,58 @@ struct Nota {
 
 // Acesso permitido: arpejo ascendente ("liberado").
 const Nota somPortaAberta[] = {
-  {523, 50}, {659, 50}, {784, 50}, {1047, 200},
-  {0, 0}
-};
+    {523, 50}, {659, 50}, {784, 50}, {1047, 200}, {0, 0}};
 
 // Alarme/tamper: alternancia aguda e estridente (padrao de alerta).
 const Nota somAlarme[] = {
-  {2500, 300}, {2000, 300}, {2500, 300}, {2000, 300},
-  {0, 0}
-};
+    {2500, 300}, {2000, 300}, {2500, 300}, {2000, 300}, {0, 0}};
 
 // Boot: bipe curto + bipe mais alto = "sistema pronto".
-const Nota somBoot[] = {
-  {1800, 80},
-  {0, 40},
-  {2300, 200},
-  {0, 0}
-};
+const Nota somBoot[] = {{1800, 80}, {0, 40}, {2300, 200}, {0, 0}};
 
 // Acesso negado: descendente e grave. Seco, e inconfundivel com o de
 // abertura justamente porque desce e termina no registro grave.
-const Nota somAcessoNegado[] = {
-  {600, 150},   // ataque imediato
-  {450, 150},   // transicao rapida
-  {300, 300},   // finalizacao grave e seca
-  {0, 0}
-};
+const Nota somAcessoNegado[] = {{600, 150}, // ataque imediato
+                                {450, 150}, // transicao rapida
+                                {300, 300}, // finalizacao grave e seca
+                                {0, 0}};
 
 // ==================== VOTACAO POR RAJADA ====================
-#define ALVO_NOME     "caio"   // unico nome autorizado a abrir
-#define PISO_SIM      0.92f    // similaridade minima pra um frame virar VOTO.
-                               // Este e o gate REAL de seguranca -- deve ficar
-                               // acima do teto observado do impostor e abaixo
-                               // do chao observado do dono. MEDIR e ajustar.
-#define JANELA_N      7        // teto de frames validos por tentativa
-#define VOTOS_K       4        // votos a favor necessarios (K de N)
-#define TIMEOUT_MS    12000    // aborta se nao juntar N validos a tempo
+#define ALVO_NOME "caio" // unico nome autorizado a abrir
+#define PISO_SIM                                                               \
+  0.92f                  // similaridade minima pra um frame virar VOTO.
+                         // Este e o gate REAL de seguranca -- deve ficar
+                         // acima do teto observado do impostor e abaixo
+                         // do chao observado do dono. MEDIR e ajustar.
+#define JANELA_N 7       // teto de frames validos por tentativa
+#define VOTOS_K 4        // votos a favor necessarios (K de N)
+#define TIMEOUT_MS 12000 // aborta se nao juntar N validos a tempo
 
 // ==================== QUALITY-GATE ====================
 // (I) Os limiares de BRILHO foram removidos -- ver nota no cabecalho.
 // Sobraram os dois que se apoiam em relacao fisica real com o tamanho do JPEG.
-#define MIN_SHARP        3000  // abaixo disso = desfocado. Com quality fixa,
-                               // imagem borrada comprime mais -> JPEG menor.
-#define MAX_SHARP        38000 // teto: frame gigante = ruido/anomalia
-#define MOV_MAX_DELTA    9000  // salto de tamanho do JPEG entre 2 frames.
-                               // Cena mudando rapido -> risco de motion blur.
+#define MIN_SHARP                                                              \
+  3000                  // abaixo disso = desfocado. Com quality fixa,
+                        // imagem borrada comprime mais -> JPEG menor.
+#define MAX_SHARP 38000 // teto: frame gigante = ruido/anomalia
+#define MOV_MAX_DELTA                                                          \
+  9000 // salto de tamanho do JPEG entre 2 frames.
+       // Cena mudando rapido -> risco de motion blur.
 
 // ==================== EXPOSICAO ====================
 // Com exposicao fixa o brilho para de variar entre frames, o que estabiliza
 // os embeddings e mata flicker. EXIGE luz constante (COB); e justamente por
 // isso o controle do COB via LDR faz sentido: ele mantem a cena estavel.
-#define EXPOSICAO_FIXA   true
-#define AEC_VALOR_FIXO   300    // 0..1200
-#define AGC_GANHO_FIXO   0      // 0..30 (ganho baixo = menos ruido)
+#define EXPOSICAO_FIXA true
+#define AEC_VALOR_FIXO 300 // 0..1200
+#define AGC_GANHO_FIXO 0   // 0..30 (ganho baixo = menos ruido)
 
 // ==================== CONFIG ====================
 #define WIFI_SSID "Caio.2g"
 #define WIFI_PASS "28460363"
-#define JPG_CAP   40000        // teto do buffer compartilhado do stream
-#define FRAME_W   240          // camera.resolution.face()
-#define FRAME_H   240
+#define JPG_CAP 40000 // teto do buffer compartilhado do stream
+#define FRAME_W 240   // camera.resolution.face()
+#define FRAME_H 240
 
 // Resultado de uma tentativa.
 // FICA AQUI EM CIMA de proposito: o Arduino IDE injeta prototipos
@@ -154,29 +147,29 @@ const Nota somAcessoNegado[] = {
 enum Veredito { PENDENTE, APROVADO, NEGADO, EXPIROU };
 
 // Prototipos explicitos (nao dependemos da geracao automatica do IDE).
-String   prompt(String message);
-String   promptTimeout(String message, uint32_t ms);
-void     entrarEmDeepSleep();
-void     doEnroll(String defaultName = "");
-void     runRecognition();
-void     enrollMultiplo(int alvo);
-void     publishFrame(const uint8_t* buf, size_t len);
-bool     frameOk(const char* &motivoOut);
-void     pulsaLEDEspera();
-void     sinalizaResultado(int pino, const Nota melodia[]);
+String prompt(String message);
+String promptTimeout(String message, uint32_t ms);
+void entrarEmDeepSleep();
+void doEnroll();
+void runRecognition();
+void enrollMultiplo(int alvo);
+void publishFrame(const uint8_t *buf, size_t len);
+bool frameOk(const char *&motivoOut);
+void pulsaLEDEspera();
+void sinalizaResultado(int pino, const Nota melodia[]);
 Veredito runTentativa();
-void     tocarMelodia(const Nota melodia[]);
+void tocarMelodia(const Nota melodia[]);
 uint16_t lerLDR();
-void     ajustaLuz();
-void     testeLuz();
+void ajustaLuz();
+void testeLuz();
 
-bool     modoContinuo = false; // 'r' liga: imprime similaridade a cada frame
-uint32_t sharpMax     = 0;     // pico de nitidez ja visto (guia pra focar a lente)
-uint32_t lastPrint    = 0;     // throttle do serial no modo continuo
-uint32_t ultimoSharp  = 0;     // tamanho do frame anterior (detector de movimento)
-String   httpCommand  = "";    // comando recebido via web
-String   lastAccType  = "-";   // "granted", "denied" ou "-"
-String   lastAccName  = "-";   // nome ou "desconhecido"
+bool modoContinuo = false; // 'r' liga: imprime similaridade a cada frame
+uint32_t sharpMax = 0;     // pico de nitidez ja visto (guia pra focar a lente)
+uint32_t lastPrint = 0;    // throttle do serial no modo continuo
+uint32_t ultimoSharp = 0;  // tamanho do frame anterior (detector de movimento)
+String httpCommand = "";   // comando recebido via web
+String lastAccType = "-";  // "granted", "denied" ou "-"
+String lastAccName = "-";  // nome ou "desconhecido"
 
 /**
  * Toca a melodia de forma BLOQUEANTE (usa delay).
@@ -188,7 +181,7 @@ void tocarMelodia(const Nota melodia[]) {
   while (melodia[i].frequencia != 0 || melodia[i].duracao != 0) {
     if (melodia[i].frequencia == 0) {
       noTone(pinoBuzzer);
-      delay(melodia[i].duracao);      // pausa
+      delay(melodia[i].duracao); // pausa
     } else {
       tone(pinoBuzzer, melodia[i].frequencia, melodia[i].duracao);
       delay(melodia[i].duracao + 10);
@@ -205,12 +198,12 @@ void tocarMelodia(const Nota melodia[]) {
  * divisor de tensao documentado la em cima).
  */
 uint16_t lerLDR() {
-    uint32_t soma = 0;
-    for (int i = 0; i < 5; i++) {
-        soma += analogRead(pinoLDR);
-        delayMicroseconds(200);
-    }
-    return soma / 5;
+  uint32_t soma = 0;
+  for (int i = 0; i < 5; i++) {
+    soma += analogRead(pinoLDR);
+    delayMicroseconds(200);
+  }
+  return soma / 5;
 }
 
 /**
@@ -227,16 +220,17 @@ uint16_t lerLDR() {
  * fica, com anteparo bloqueando a visao direta do COB.
  */
 void ajustaLuz() {
-    uint16_t luz  = lerLDR();
-    int      erro = LDR_ALVO - (int) luz;
+  uint16_t luz = lerLDR();
+  int erro = LDR_ALVO - (int)luz;
 
-    if (abs(erro) <= BANDA_MORTA) return;   // dentro da banda: nao mexe
+  if (abs(erro) <= BANDA_MORTA)
+    return; // dentro da banda: nao mexe
 
-    // erro > 0 -> esta escuro -> sobe o duty
-    dutyLuz += (erro > 0) ? PASSO_DUTY : -PASSO_DUTY;
-    dutyLuz  = constrain(dutyLuz, DUTY_MIN, DUTY_MAX);
+  // erro > 0 -> esta escuro -> sobe o duty
+  dutyLuz += (erro > 0) ? PASSO_DUTY : -PASSO_DUTY;
+  dutyLuz = constrain(dutyLuz, DUTY_MIN, DUTY_MAX);
 
-    analogWrite(pinoLuz, dutyLuz);
+  analogWrite(pinoLuz, dutyLuz);
 }
 
 /**
@@ -246,22 +240,23 @@ void ajustaLuz() {
  * rode o teste e escolha um valor intermediario da faixa observada.
  */
 void testeLuz() {
-    Serial.println("\n>> TESTE DE LUZ (malha aberta)");
-    Serial.println("   duty  ->  leitura do LDR");
+  Serial.println("\n>> TESTE DE LUZ (malha aberta)");
+  Serial.println("   duty  ->  leitura do LDR");
 
-    const int niveis[] = {0, 32, 64, 128, 192, 255};
+  const int niveis[] = {0, 32, 64, 128, 192, 255};
 
-    for (int i = 0; i < 6; i++) {
-        analogWrite(pinoLuz, niveis[i]);
-        delay(500);   // o LDR tem inercia: precisa de tempo pra estabilizar
-        Serial.printf("   %4d  ->  %u\n", niveis[i], (unsigned) lerLDR());
-    }
+  for (int i = 0; i < 6; i++) {
+    analogWrite(pinoLuz, niveis[i]);
+    delay(500); // o LDR tem inercia: precisa de tempo pra estabilizar
+    Serial.printf("   %4d  ->  %u\n", niveis[i], (unsigned)lerLDR());
+  }
 
-    analogWrite(pinoLuz, 0);
-    delay(500);
-    Serial.printf("   luz ambiente (COB apagado): %u\n", (unsigned) lerLDR());
-    Serial.println(">> Fim. Se a leitura nao subir com o duty, e hardware:");
-    Serial.println("   MOSFET nao logic-level, GND nao comum, ou LDR mal ligado.\n");
+  analogWrite(pinoLuz, 0);
+  delay(500);
+  Serial.printf("   luz ambiente (COB apagado): %u\n", (unsigned)lerLDR());
+  Serial.println(">> Fim. Se a leitura nao subir com o duty, e hardware:");
+  Serial.println(
+      "   MOSFET nao logic-level, GND nao comum, ou LDR mal ligado.\n");
 }
 
 /**
@@ -269,26 +264,26 @@ void testeLuz() {
  * placa reinicia pelo setup() (a RAM do dominio digital foi perdida).
  */
 void entrarEmDeepSleep() {
-    Serial.println(">> Entrando em DEEP SLEEP (abra o switch para acordar)");
-    Serial.flush();   // sem isso o chip dorme antes da UART terminar de enviar
+  Serial.println(">> Entrando em DEEP SLEEP (abra o switch para acordar)");
+  Serial.flush(); // sem isso o chip dorme antes da UART terminar de enviar
 
-    digitalWrite(pinoVermelho, LOW);
-    digitalWrite(pinoVerde, LOW);
-    analogWrite(pinoAzul, 0);      // mata o PWM residual do pulsaLEDEspera
-    digitalWrite(pinoAzul, LOW);   // garante nivel logico LOW
-    analogWrite(pinoLuz, 0);       // apaga o COB
-    noTone(pinoBuzzer);
+  digitalWrite(pinoVermelho, LOW);
+  digitalWrite(pinoVerde, LOW);
+  analogWrite(pinoAzul, 0);    // mata o PWM residual do pulsaLEDEspera
+  digitalWrite(pinoAzul, LOW); // garante nivel logico LOW
+  analogWrite(pinoLuz, 0);     // apaga o COB
+  noTone(pinoBuzzer);
 
-    // O pull-up do pinMode() pertence ao dominio digital, que e DESLIGADO
-    // no deep sleep. Sem o pull-up do dominio RTC o pino fica flutuando e
-    // a placa acorda sozinha por ruido.
-    rtc_gpio_pullup_en(pinoDeepSleep);
-    rtc_gpio_pulldown_dis(pinoDeepSleep);
+  // O pull-up do pinMode() pertence ao dominio digital, que e DESLIGADO
+  // no deep sleep. Sem o pull-up do dominio RTC o pino fica flutuando e
+  // a placa acorda sozinha por ruido.
+  rtc_gpio_pullup_en(pinoDeepSleep);
+  rtc_gpio_pulldown_dis(pinoDeepSleep);
 
-    // ext0: acorda quando o pino for a HIGH, ou seja, quando o switch ABRIR.
-    esp_sleep_enable_ext0_wakeup(pinoDeepSleep, 1);
+  // ext0: acorda quando o pino for a HIGH, ou seja, quando o switch ABRIR.
+  esp_sleep_enable_ext0_wakeup(pinoDeepSleep, 1);
 
-    esp_deep_sleep_start();
+  esp_deep_sleep_start();
 }
 
 /**
@@ -300,13 +295,13 @@ void entrarEmDeepSleep() {
  * chamada em TODAS as cinco saidas da tentativa.
  */
 void sinalizaResultado(int pino, const Nota melodia[]) {
-    analogWrite(pinoAzul, 0);
-    digitalWrite(pinoAzul, LOW);
-    analogWrite(pinoLuz, 0);      // apaga a iluminacao ao encerrar
-    digitalWrite(pino, HIGH);
-    tocarMelodia(melodia);
-    delay(2500);                  // mantem a cor visivel (simula porta aberta)
-    digitalWrite(pino, LOW);
+  analogWrite(pinoAzul, 0);
+  digitalWrite(pinoAzul, LOW);
+  analogWrite(pinoLuz, 0); // apaga a iluminacao ao encerrar
+  digitalWrite(pino, HIGH);
+  tocarMelodia(melodia);
+  delay(2500); // mantem a cor visivel (simula porta aberta)
+  digitalWrite(pino, LOW);
 }
 
 /**
@@ -315,9 +310,9 @@ void sinalizaResultado(int pino, const Nota melodia[]) {
  * do laco de quem estiver trabalhando.
  */
 void pulsaLEDEspera() {
-    float onda      = (sin(millis() / 300.0) + 1) / 2;   // normaliza -1..1 para 0..1
-    int   brilhoLED = onda * 255;
-    analogWrite(pinoAzul, brilhoLED);
+  float onda = (sin(millis() / 300.0) + 1) / 2; // normaliza -1..1 para 0..1
+  int brilhoLED = onda * 255;
+  analogWrite(pinoAzul, brilhoLED);
 }
 
 /**
@@ -327,29 +322,35 @@ void pulsaLEDEspera() {
  * por nao medir o que dizia medir.
  * Escreve o motivo da rejeicao em motivoOut (passado por referencia).
  */
-bool frameOk(const char* &motivoOut) {
-    uint32_t sharp = camera.frame->len;   // o tamanho do JPEG E o proxy de nitidez
+bool frameOk(const char *&motivoOut) {
+  uint32_t sharp = camera.frame->len; // o tamanho do JPEG E o proxy de nitidez
 
-    // 1) NITIDEZ
-    if (sharp < MIN_SHARP) { motivoOut = "desfocado (sharp baixo)";     return false; }
-    if (sharp > MAX_SHARP) { motivoOut = "anomalo (sharp alto demais)"; return false; }
+  // 1) NITIDEZ
+  if (sharp < MIN_SHARP) {
+    motivoOut = "desfocado (sharp baixo)";
+    return false;
+  }
+  if (sharp > MAX_SHARP) {
+    motivoOut = "anomalo (sharp alto demais)";
+    return false;
+  }
 
-    // 2) MOVIMENTO: JPEG muda muito de tamanho quando a cena muda rapido.
-    //    Na 1a chamada ultimoSharp = 0 e o teste e pulado.
-    if (ultimoSharp != 0) {
-        uint32_t delta = (sharp > ultimoSharp) ? (sharp - ultimoSharp)
-                                               : (ultimoSharp - sharp);
-        if (delta > MOV_MAX_DELTA) {
-            ultimoSharp = sharp;   // atualiza antes de sair, senao a proxima
-                                   // comparacao usaria referencia velha
-            motivoOut = "movimento excessivo";
-            return false;
-        }
+  // 2) MOVIMENTO: JPEG muda muito de tamanho quando a cena muda rapido.
+  //    Na 1a chamada ultimoSharp = 0 e o teste e pulado.
+  if (ultimoSharp != 0) {
+    uint32_t delta =
+        (sharp > ultimoSharp) ? (sharp - ultimoSharp) : (ultimoSharp - sharp);
+    if (delta > MOV_MAX_DELTA) {
+      ultimoSharp = sharp; // atualiza antes de sair, senao a proxima
+                           // comparacao usaria referencia velha
+      motivoOut = "movimento excessivo";
+      return false;
     }
-    ultimoSharp = sharp;
+  }
+  ultimoSharp = sharp;
 
-    motivoOut = "ok";
-    return true;
+  motivoOut = "ok";
+  return true;
 }
 
 /**
@@ -363,104 +364,115 @@ bool frameOk(const char* &motivoOut) {
  *   EARLY-FAIL: mesmo acertando todos os frames restantes nao da K -> aborta
  */
 Veredito runTentativa() {
-    int      validos    = 0;
-    int      votosFavor = 0;
-    uint32_t t0         = millis();
-    const char* motivo  = "";
+  int validos = 0;
+  int votosFavor = 0;
+  uint32_t t0 = millis();
+  const char *motivo = "";
 
-    Serial.println(">> TENTATIVA iniciada");
+  Serial.println(">> TENTATIVA iniciada");
 
-    analogWrite(pinoLuz, dutyLuz);   // acende no duty aprendido
+  analogWrite(pinoLuz, dutyLuz); // acende no duty aprendido
 
-    while (validos < JANELA_N) {
+  while (validos < JANELA_N) {
 
-        pulsaLEDEspera();   // precisa ser chamada no laco pra "respirar"
+    pulsaLEDEspera(); // precisa ser chamada no laco pra "respirar"
 
-        // Timeout: rosto nao apareceu ou sumiu no meio.
-        if (millis() - t0 > TIMEOUT_MS) {
-            Serial.printf(">> EXPIROU (so %d/%d validos)\n", validos, JANELA_N);
-            sinalizaResultado(pinoVermelho, somAcessoNegado);
-            lastAccType = "denied"; lastAccName = "timeout";
-            return EXPIROU;
-        }
-
-        // Frame fresco. A lib gerencia o buffer sozinha (nao ha fb_return).
-        if (!camera.capture().isOk()) { delay(20); continue; }
-        publishFrame(camera.frame->buf, camera.frame->len);  // mantem o feed vivo
-
-        // Controle de luz ANTES do gate: o LDR independe do frame, e se o
-        // gate rejeitasse primeiro o controle nunca agiria quando a cena
-        // estivesse ruim -- justamente quando ele e necessario.
-        ajustaLuz();
-
-        // Descarta frame ruim ANTES de gastar inferencia.
-        if (!frameOk(motivo)) {
-            Serial.printf("   frame descartado: %s\n", motivo);
-            continue;   // nao conta como valido
-        }
-
-        // Nenhum dos dois conta como valido se falhar: sem rosto na cena
-        // ou modelo sem resposta nao sao "voto contra", sao "nada".
-        if (!recognition.detect().isOk())    continue;
-        if (!recognition.recognize().isOk()) continue;
-
-        validos++;
-        const char* nome = recognition.match.name.c_str();
-        float       sim  = recognition.match.similarity;
-
-        // O voto exige AS DUAS coisas: nome certo e similaridade acima do piso.
-        bool aFavor = (strcmp(nome, ALVO_NOME) == 0) && (sim >= PISO_SIM);
-        if (aFavor) votosFavor++;
-
-        Serial.printf("   frame %d/%d: %s sim=%.3f -> %s  (favor=%d)\n",
-                      validos, JANELA_N, nome, sim,
-                      aFavor ? "VOTO" : "descartado", votosFavor);
-
-        // EARLY-EXIT
-        if (votosFavor >= VOTOS_K) {
-            Serial.printf(">> APROVADO (early-exit: %d votos em %d frames)\n",
-                          votosFavor, validos);
-            sinalizaResultado(pinoVerde, somPortaAberta);
-            lastAccType = "granted"; lastAccName = ALVO_NOME;
-            return APROVADO;
-        }
-
-        // EARLY-FAIL: aritmetica simples, ja nao da mais pra atingir K.
-        int restantes = JANELA_N - validos;
-        if (votosFavor + restantes < VOTOS_K) {
-            Serial.printf(">> NEGADO (early-fail: %d votos, faltam %d frames)\n",
-                          votosFavor, restantes);
-            sinalizaResultado(pinoVermelho, somAcessoNegado);
-            lastAccType = "denied"; lastAccName = "desconhecido";
-            return NEGADO;
-        }
+    // Timeout: rosto nao apareceu ou sumiu no meio.
+    if (millis() - t0 > TIMEOUT_MS) {
+      Serial.printf(">> EXPIROU (so %d/%d validos)\n", validos, JANELA_N);
+      sinalizaResultado(pinoVermelho, somAcessoNegado);
+      lastAccType = "denied";
+      lastAccName = "timeout";
+      return EXPIROU;
     }
 
-    // Rede de seguranca: com os early-exit/fail acima o fluxo nao deveria
-    // chegar aqui, mas se chegar, o juiz decide pela contagem final.
+    // Frame fresco. A lib gerencia o buffer sozinha (nao ha fb_return).
+    if (!camera.capture().isOk()) {
+      delay(20);
+      continue;
+    }
+    publishFrame(camera.frame->buf, camera.frame->len); // mantem o feed vivo
+
+    // Controle de luz ANTES do gate: o LDR independe do frame, e se o
+    // gate rejeitasse primeiro o controle nunca agiria quando a cena
+    // estivesse ruim -- justamente quando ele e necessario.
+    ajustaLuz();
+
+    // Descarta frame ruim ANTES de gastar inferencia.
+    if (!frameOk(motivo)) {
+      Serial.printf("   frame descartado: %s\n", motivo);
+      continue; // nao conta como valido
+    }
+
+    // Nenhum dos dois conta como valido se falhar: sem rosto na cena
+    // ou modelo sem resposta nao sao "voto contra", sao "nada".
+    if (!recognition.detect().isOk())
+      continue;
+    if (!recognition.recognize().isOk())
+      continue;
+
+    validos++;
+    const char *nome = recognition.match.name.c_str();
+    float sim = recognition.match.similarity;
+
+    // O voto exige AS DUAS coisas: nome certo e similaridade acima do piso.
+    bool aFavor = (strcmp(nome, ALVO_NOME) == 0) && (sim >= PISO_SIM);
+    if (aFavor)
+      votosFavor++;
+
+    Serial.printf("   frame %d/%d: %s sim=%.3f -> %s  (favor=%d)\n", validos,
+                  JANELA_N, nome, sim, aFavor ? "VOTO" : "descartado",
+                  votosFavor);
+
+    // EARLY-EXIT
     if (votosFavor >= VOTOS_K) {
-        Serial.printf(">> APROVADO (%d/%d votos)\n", votosFavor, validos);
-        sinalizaResultado(pinoVerde, somPortaAberta);
-        lastAccType = "granted"; lastAccName = ALVO_NOME;
-        return APROVADO;
+      Serial.printf(">> APROVADO (early-exit: %d votos em %d frames)\n",
+                    votosFavor, validos);
+      sinalizaResultado(pinoVerde, somPortaAberta);
+      lastAccType = "granted";
+      lastAccName = ALVO_NOME;
+      return APROVADO;
     }
 
-    Serial.printf(">> NEGADO (%d/%d votos, precisava %d)\n",
-                  votosFavor, validos, VOTOS_K);
-    sinalizaResultado(pinoVermelho, somAcessoNegado);
-    lastAccType = "denied"; lastAccName = "desconhecido";
-    return NEGADO;
+    // EARLY-FAIL: aritmetica simples, ja nao da mais pra atingir K.
+    int restantes = JANELA_N - validos;
+    if (votosFavor + restantes < VOTOS_K) {
+      Serial.printf(">> NEGADO (early-fail: %d votos, faltam %d frames)\n",
+                    votosFavor, restantes);
+      sinalizaResultado(pinoVermelho, somAcessoNegado);
+      return NEGADO;
+    }
+  }
+
+  // Rede de seguranca: com os early-exit/fail acima o fluxo nao deveria
+  // chegar aqui, mas se chegar, o juiz decide pela contagem final.
+  if (votosFavor >= VOTOS_K) {
+    Serial.printf(">> APROVADO (%d/%d votos)\n", votosFavor, validos);
+    sinalizaResultado(pinoVerde, somPortaAberta);
+    lastAccType = "granted";
+    lastAccName = ALVO_NOME;
+    return APROVADO;
+  }
+
+  Serial.printf(">> NEGADO (%d/%d votos, precisava %d)\n", votosFavor, validos,
+                VOTOS_K);
+  sinalizaResultado(pinoVermelho, somAcessoNegado);
+  lastAccType = "denied";
+  lastAccName = "desconhecido";
+  return NEGADO;
 }
 
 // ==================== BUFFER COMPARTILHADO DO STREAM ====================
 // O loop principal escreve aqui; a task do servidor HTTP le. Sao contextos
 // diferentes (FreeRTOS), por isso o mutex.
-static uint8_t*          g_jpg     = nullptr;   // copia do ultimo frame (PSRAM)
-static size_t            g_jpgLen  = 0;
-static volatile uint32_t g_frameId = 0;         // contador: sinaliza frame novo
-static SemaphoreHandle_t g_mutex   = nullptr;
-static char              g_info[350] = "{\"face\":0,\"sharp\":0,\"peak\":0,\"ldr\":0,\"name\":\"-\",\"sim\":\"-\",\"last_acc\":\"-\",\"last_name\":\"-\"}";
-static httpd_handle_t    g_server  = nullptr;
+static uint8_t *g_jpg = nullptr; // copia do ultimo frame (PSRAM)
+static size_t g_jpgLen = 0;
+static volatile uint32_t g_frameId = 0; // contador: sinaliza frame novo
+static SemaphoreHandle_t g_mutex = nullptr;
+static char g_info[350] =
+    "{\"face\":0,\"sharp\":0,\"peak\":0,\"ldr\":0,\"name\":\"-\",\"sim\":\"-\","
+    "\"last_acc\":\"-\",\"last_name\":\"-\"}";
+static httpd_handle_t g_server = nullptr;
 
 /**
  * Copia o frame pro buffer compartilhado.
@@ -468,35 +480,37 @@ static httpd_handle_t    g_server  = nullptr;
  * em vez de travar o loop de captura. Preferivel perder feed a travar a
  * fechadura.
  */
-void publishFrame(const uint8_t* buf, size_t len) {
-    if (!g_jpg || !buf || len == 0 || len > JPG_CAP) return;
-    if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(20)) != pdTRUE) return;
-    memcpy(g_jpg, buf, len);
-    g_jpgLen = len;
-    g_frameId++;
-    xSemaphoreGive(g_mutex);
+void publishFrame(const uint8_t *buf, size_t len) {
+  if (!g_jpg || !buf || len == 0 || len > JPG_CAP)
+    return;
+  if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(20)) != pdTRUE)
+    return;
+  memcpy(g_jpg, buf, len);
+  g_jpgLen = len;
+  g_frameId++;
+  xSemaphoreGive(g_mutex);
 }
 
 // ==================== HTTP ====================
 
 /** /info -> JSON com as metricas. no-store pro navegador nao cachear. */
-static esp_err_t infoHandler(httpd_req_t* req) {
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-    return httpd_resp_send(req, g_info, HTTPD_RESP_USE_STRLEN);
+static esp_err_t infoHandler(httpd_req_t *req) {
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  return httpd_resp_send(req, g_info, HTTPD_RESP_USE_STRLEN);
 }
 
-static esp_err_t controlHandler(httpd_req_t* req) {
-    char buf[32];
-    if (httpd_req_get_url_query_str(req, buf, sizeof(buf)) == ESP_OK) {
-        char val[16];
-        if (httpd_query_key_value(buf, "cmd", val, sizeof(val)) == ESP_OK) {
-            httpCommand = String(val);
-        }
+static esp_err_t controlHandler(httpd_req_t *req) {
+  char buf[32];
+  if (httpd_req_get_url_query_str(req, buf, sizeof(buf)) == ESP_OK) {
+    char val[16];
+    if (httpd_query_key_value(buf, "cmd", val, sizeof(val)) == ESP_OK) {
+      httpCommand = String(val);
     }
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-    return httpd_resp_send(req, "OK", 2);
+  }
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  return httpd_resp_send(req, "OK", 2);
 }
 
 /**
@@ -505,37 +519,44 @@ static esp_err_t controlHandler(httpd_req_t* req) {
  * Copia pra um buffer local antes de enviar, pra soltar o mutex rapido e
  * nao segurar o loop de captura durante a transmissao (que e lenta).
  */
-static esp_err_t streamHandler(httpd_req_t* req) {
-    uint8_t* local = (uint8_t*) ps_malloc(JPG_CAP);
-    if (!local) return ESP_FAIL;
+static esp_err_t streamHandler(httpd_req_t *req) {
+  uint8_t *local = (uint8_t *)ps_malloc(JPG_CAP);
+  if (!local)
+    return ESP_FAIL;
 
-    httpd_resp_set_type(req, "multipart/x-mixed-replace;boundary=frame");
-    uint32_t lastId = 0;
-    char part[96];
+  httpd_resp_set_type(req, "multipart/x-mixed-replace;boundary=frame");
+  uint32_t lastId = 0;
+  char part[96];
 
-    while (true) {
-        size_t len = 0;
-        if (xSemaphoreTake(g_mutex, portMAX_DELAY) == pdTRUE) {
-            // So copia se houver frame NOVO (evita reenviar o mesmo).
-            if (g_frameId != lastId && g_jpgLen) {
-                memcpy(local, g_jpg, g_jpgLen);
-                len    = g_jpgLen;
-                lastId = g_frameId;
-            }
-            xSemaphoreGive(g_mutex);
-        }
-        if (!len) { delay(10); continue; }   // nada novo: espera
-
-        // Qualquer falha de envio = cliente fechou a aba -> sai do laco.
-        if (httpd_resp_send_chunk(req, "\r\n--frame\r\n", 11) != ESP_OK) break;
-        int n = snprintf(part, sizeof(part),
-                         "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n",
-                         (unsigned) len);
-        if (httpd_resp_send_chunk(req, part, n) != ESP_OK) break;
-        if (httpd_resp_send_chunk(req, (const char*) local, len) != ESP_OK) break;
+  while (true) {
+    size_t len = 0;
+    if (xSemaphoreTake(g_mutex, portMAX_DELAY) == pdTRUE) {
+      // So copia se houver frame NOVO (evita reenviar o mesmo).
+      if (g_frameId != lastId && g_jpgLen) {
+        memcpy(local, g_jpg, g_jpgLen);
+        len = g_jpgLen;
+        lastId = g_frameId;
+      }
+      xSemaphoreGive(g_mutex);
     }
-    free(local);
-    return ESP_OK;
+    if (!len) {
+      delay(10);
+      continue;
+    } // nada novo: espera
+
+    // Qualquer falha de envio = cliente fechou a aba -> sai do laco.
+    if (httpd_resp_send_chunk(req, "\r\n--frame\r\n", 11) != ESP_OK)
+      break;
+    int n = snprintf(part, sizeof(part),
+                     "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n",
+                     (unsigned)len);
+    if (httpd_resp_send_chunk(req, part, n) != ESP_OK)
+      break;
+    if (httpd_resp_send_chunk(req, (const char *)local, len) != ESP_OK)
+      break;
+  }
+  free(local);
+  return ESP_OK;
 }
 
 // Pagina de debug: imagem + miras de centralizacao + area segura tracejada
@@ -572,248 +593,283 @@ setInterval(async () => {
 </script>
 )HTML";
 
-static esp_err_t indexHandler(httpd_req_t* req) {
-    httpd_resp_set_type(req, "text/html");
-    return httpd_resp_send(req, INDEX_HTML, HTTPD_RESP_USE_STRLEN);
+static esp_err_t indexHandler(httpd_req_t *req) {
+  httpd_resp_set_type(req, "text/html");
+  return httpd_resp_send(req, INDEX_HTML, HTTPD_RESP_USE_STRLEN);
 }
 
 /** Sobe o httpd com stack maior que o padrao (o stream precisa). */
 void startServer() {
-    httpd_config_t cfg   = HTTPD_DEFAULT_CONFIG();
-    cfg.server_port      = 80;
-    cfg.ctrl_port        = 32768;
-    cfg.max_uri_handlers = 8;
-    cfg.stack_size       = 8192;
+  httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
+  cfg.server_port = 80;
+  cfg.ctrl_port = 32768;
+  cfg.max_uri_handlers = 8;
+  cfg.stack_size = 8192;
 
-    if (httpd_start(&g_server, &cfg) != ESP_OK) {
-        Serial.println("ERRO: httpd falhou");
-        return;
-    }
+  if (httpd_start(&g_server, &cfg) != ESP_OK) {
+    Serial.println("ERRO: httpd falhou");
+    return;
+  }
 
-    httpd_uri_t u1 = { "/",       HTTP_GET, indexHandler,  nullptr };
-    httpd_uri_t u2 = { "/stream", HTTP_GET, streamHandler, nullptr };
-    httpd_uri_t u3 = { "/info",   HTTP_GET, infoHandler,   nullptr };
-    httpd_uri_t u4 = { "/control",HTTP_GET, controlHandler,nullptr };
-    httpd_register_uri_handler(g_server, &u1);
-    httpd_register_uri_handler(g_server, &u2);
-    httpd_register_uri_handler(g_server, &u3);
-    httpd_register_uri_handler(g_server, &u4);
+  httpd_uri_t u1 = {"/", HTTP_GET, indexHandler, nullptr};
+  httpd_uri_t u2 = {"/stream", HTTP_GET, streamHandler, nullptr};
+  httpd_uri_t u3 = {"/info", HTTP_GET, infoHandler, nullptr};
+  httpd_uri_t u4 = {"/control", HTTP_GET, controlHandler, nullptr};
+  httpd_register_uri_handler(g_server, &u1);
+  httpd_register_uri_handler(g_server, &u2);
+  httpd_register_uri_handler(g_server, &u3);
+  httpd_register_uri_handler(g_server, &u4);
 }
 
 // ==================== SETUP ====================
 void setup() {
-    delay(2000);                  // da tempo do monitor serial conectar
-    Serial.begin(115200);
-    Serial.println("\n=== DIAGNOSTICO + LIVE FEED (v4) ===");
+  delay(2000); // da tempo do monitor serial conectar
+  Serial.begin(115200);
+  Serial.println("\n=== DIAGNOSTICO + LIVE FEED (v4) ===");
 
-    // Distingue boot por energia de retorno do deep sleep. Util pra
-    // confirmar que o ciclo de sono realmente aconteceu.
-    if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0)
-        Serial.println(">> Acordei do DEEP SLEEP (switch aberto)");
-    else
-        Serial.println(">> Boot normal (energia/reset)");
+  // Distingue boot por energia de retorno do deep sleep. Util pra
+  // confirmar que o ciclo de sono realmente aconteceu.
+  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0)
+    Serial.println(">> Acordei do DEEP SLEEP (switch aberto)");
+  else
+    Serial.println(">> Boot normal (energia/reset)");
 
-    pinMode(pinoVermelho, OUTPUT);
-    pinMode(pinoVerde, OUTPUT);
-    pinMode(pinoAzul, OUTPUT);
-    pinMode(pinoBuzzer, OUTPUT);
-    pinMode(pinoLuz, OUTPUT);
-    pinMode(iniciarReconhecimento, INPUT_PULLUP);   // solto = HIGH
+  pinMode(pinoVermelho, OUTPUT);
+  pinMode(pinoVerde, OUTPUT);
+  pinMode(pinoAzul, OUTPUT);
+  pinMode(pinoBuzzer, OUTPUT);
+  pinMode(pinoLuz, OUTPUT);
+  pinMode(iniciarReconhecimento, INPUT_PULLUP); // solto = HIGH
 
-    // (J) ADC do LDR. 12 bits -> 0..4095. Atenuacao de 11dB abre a faixa de
-    // leitura para ~0..3.3V; sem isso o ADC satura em ~1V e o divisor de
-    // tensao ficaria inutilizavel na pratica.
-    analogReadResolution(12);
-    analogSetPinAttenuation(pinoLDR, ADC_11db);
+  // (J) ADC do LDR. 12 bits -> 0..4095. Atenuacao de 11dB abre a faixa de
+  // leitura para ~0..3.3V; sem isso o ADC satura em ~1V e o divisor de
+  // tensao ficaria inutilizavel na pratica.
+  analogReadResolution(12);
+  analogSetPinAttenuation(pinoLDR, ADC_11db);
 
-    // Devolve o pino do controle RTC pro controle digital normal. Sem isso
-    // ele pode continuar "congelado" no estado em que entrou no sono.
-    rtc_gpio_deinit(pinoDeepSleep);
-    pinMode(pinoDeepSleep, INPUT_PULLUP);
+  // Devolve o pino do controle RTC pro controle digital normal. Sem isso
+  // ele pode continuar "congelado" no estado em que entrou no sono.
+  rtc_gpio_deinit(pinoDeepSleep);
+  pinMode(pinoDeepSleep, INPUT_PULLUP);
 
-    // --- Configuracao da camera (ANTES do begin) ---
-    camera.pinout.freenove_s3();
-    camera.brownout.disable();     // evita reset por queda de tensao no pico
-    camera.resolution.face();      // 240x240, resolucao esperada pelo modelo
-    camera.quality.high();         // quality FIXA: e o que torna o tamanho do
-                                   // JPEG utilizavel como proxy de nitidez
-    camera.xclk.slow();            // 10MHz: OV2640 estavel, sem chuvisco
+  // --- Configuracao da camera (ANTES do begin) ---
+  camera.pinout.freenove_s3();
+  camera.brownout.disable(); // evita reset por queda de tensao no pico
+  camera.resolution.face();  // 240x240, resolucao esperada pelo modelo
+  camera.quality.high();     // quality FIXA: e o que torna o tamanho do
+                             // JPEG utilizavel como proxy de nitidez
+  camera.xclk.slow();        // 10MHz: OV2640 estavel, sem chuvisco
 
-    detection.accurate();          // modelo de deteccao mais preciso (e mais lento)
-    detection.confidence(0.7);
-    recognition.confidence(0.85);  // filtro interno da lib; o gate real de
-                                   // seguranca e o PISO_SIM da votacao
+  detection.accurate(); // modelo de deteccao mais preciso (e mais lento)
+  detection.confidence(0.7);
+  recognition.confidence(0.85); // filtro interno da lib; o gate real de
+                                // seguranca e o PISO_SIM da votacao
 
-    // Laco ate conseguir: sem camera ou sem modelo nao ha o que fazer.
-    while (!camera.begin().isOk())
-        Serial.println(camera.exception.toString());
-    while (!recognition.begin().isOk())
-        Serial.println(recognition.exception.toString());
+  // Laco ate conseguir: sem camera ou sem modelo nao ha o que fazer.
+  while (!camera.begin().isOk())
+    Serial.println(camera.exception.toString());
+  while (!recognition.begin().isOk())
+    Serial.println(recognition.exception.toString());
 
-    Serial.println("Camera OK / Recognizer OK");
+  Serial.println("Camera OK / Recognizer OK");
 
-    // --- Ajuste do SENSOR (obrigatoriamente DEPOIS do begin) ---
-    // Este e o UNICO ponto onde da pra "normalizar a imagem": a lib roda a
-    // inferencia sobre o frame interno, e o buffer que temos e JPEG
-    // comprimido -- nao da pra filtrar pixel entre captura e inferencia.
-    sensor_t* s = esp_camera_sensor_get();
-    if (s) {
-        s->set_hmirror(s, 1);                                  // espelha horizontal
-        s->set_gainceiling(s, (gainceiling_t) GAINCEILING_2X); // teto de ganho baixo = menos ruido
-        s->set_brightness(s, 1);      // -2..2
-        s->set_contrast(s, 1);        // -2..2, ajuda o detalhe fino
-        s->set_saturation(s, 0);
-        s->set_whitebal(s, 1);        // white balance
-        s->set_awb_gain(s, 1);
-        s->set_lenc(s, 1);            // corrige vinheta da lente (bordas escuras)
-        s->set_vflip(s, 0);
-        s->set_dcw(s, 1);
+  // --- Ajuste do SENSOR (obrigatoriamente DEPOIS do begin) ---
+  // Este e o UNICO ponto onde da pra "normalizar a imagem": a lib roda a
+  // inferencia sobre o frame interno, e o buffer que temos e JPEG
+  // comprimido -- nao da pra filtrar pixel entre captura e inferencia.
+  sensor_t *s = esp_camera_sensor_get();
+  if (s) {
+    s->set_hmirror(s, 1); // espelha horizontal
+    s->set_gainceiling(
+        s, (gainceiling_t)GAINCEILING_2X); // teto de ganho baixo = menos ruido
+    s->set_brightness(s, 1);               // -2..2
+    s->set_contrast(s, 1);                 // -2..2, ajuda o detalhe fino
+    s->set_saturation(s, 0);
+    s->set_whitebal(s, 1); // white balance
+    s->set_awb_gain(s, 1);
+    s->set_lenc(s, 1); // corrige vinheta da lente (bordas escuras)
+    s->set_vflip(s, 0);
+    s->set_dcw(s, 1);
 
-        s->set_raw_gma(s, 1);         // curva de gama do ISP: detalhe em sombras/altas
-        s->set_bpc(s, 1);             // correcao de pixels ruins
-        s->set_wpc(s, 1);
+    s->set_raw_gma(s, 1); // curva de gama do ISP: detalhe em sombras/altas
+    s->set_bpc(s, 1);     // correcao de pixels ruins
+    s->set_wpc(s, 1);
 
-        if (EXPOSICAO_FIXA) {
-            // Desliga os automaticos e trava os valores. Frames com brilho
-            // constante geram embeddings mais consistentes.
-            s->set_gain_ctrl(s, 0);              // AGC off
-            s->set_exposure_ctrl(s, 0);          // AEC off
-            s->set_aec2(s, 0);                   // AEC DSP off
-            s->set_agc_gain(s, AGC_GANHO_FIXO);
-            s->set_aec_value(s, AEC_VALOR_FIXO);
-            Serial.println("Sensor: EXPOSICAO FIXA (auto desligado)");
-        } else {
-            s->set_gain_ctrl(s, 1);
-            s->set_exposure_ctrl(s, 1);
-            s->set_ae_level(s, 1);               // -2..2, sobe se estiver escuro
-            Serial.println("Sensor: exposicao AUTO");
-        }
-        Serial.println("Sensor tunado");
+    if (EXPOSICAO_FIXA) {
+      // Desliga os automaticos e trava os valores. Frames com brilho
+      // constante geram embeddings mais consistentes.
+      s->set_gain_ctrl(s, 0);     // AGC off
+      s->set_exposure_ctrl(s, 0); // AEC off
+      s->set_aec2(s, 0);          // AEC DSP off
+      s->set_agc_gain(s, AGC_GANHO_FIXO);
+      s->set_aec_value(s, AEC_VALOR_FIXO);
+      Serial.println("Sensor: EXPOSICAO FIXA (auto desligado)");
+    } else {
+      s->set_gain_ctrl(s, 1);
+      s->set_exposure_ctrl(s, 1);
+      s->set_ae_level(s, 1); // -2..2, sobe se estiver escuro
+      Serial.println("Sensor: exposicao AUTO");
     }
-    else Serial.println("AVISO: sensor_get falhou");
+    Serial.println("Sensor tunado");
+  } else
+    Serial.println("AVISO: sensor_get falhou");
 
-    // --- Buffer do stream + rede ---
-    g_mutex = xSemaphoreCreateMutex();
-    g_jpg   = (uint8_t*) ps_malloc(JPG_CAP);   // PSRAM: 40KB nao cabe na RAM interna
-    if (!g_jpg) {
-        Serial.println("ERRO: ps_malloc falhou. PSRAM habilitada? (OPI PSRAM)");
-        while (true) delay(1000);              // trava proposital: sem buffer nao roda
-    }
+  // --- Buffer do stream + rede ---
+  g_mutex = xSemaphoreCreateMutex();
+  g_jpg = (uint8_t *)ps_malloc(JPG_CAP); // PSRAM: 40KB nao cabe na RAM interna
+  if (!g_jpg) {
+    Serial.println("ERRO: ps_malloc falhou. PSRAM habilitada? (OPI PSRAM)");
+    while (true)
+      delay(1000); // trava proposital: sem buffer nao roda
+  }
 
-    WiFi.mode(WIFI_STA);
-    WiFi.setSleep(false);      // desliga o power save do WiFi: latencia estavel no stream
-    WiFi.begin(WIFI_SSID, WIFI_PASS);
-    Serial.print("WiFi");
-    while (WiFi.status() != WL_CONNECTED) { delay(300); Serial.print("."); }
-    Serial.println();
+  WiFi.mode(WIFI_STA);
+  WiFi.setSleep(
+      false); // desliga o power save do WiFi: latencia estavel no stream
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  Serial.print("WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(300);
+    Serial.print(".");
+  }
+  Serial.println();
 
-    startServer();
-    Serial.print(">>> ABRA NO NAVEGADOR:  http://");
-    Serial.println(WiFi.localIP());
-    Serial.println();
+  startServer();
+  Serial.print(">>> ABRA NO NAVEGADOR:  http://");
+  Serial.println(WiFi.localIP());
+  Serial.println();
 
-    Serial.printf("LDR (luz ambiente no boot): %u\n", (unsigned) lerLDR());
+  Serial.printf("LDR (luz ambiente no boot): %u\n", (unsigned)lerLDR());
 
-    tocarMelodia(somBoot);
+  tocarMelodia(somBoot);
 
-    while (Serial.available()) Serial.read();   // limpa lixo do buffer serial
+  while (Serial.available())
+    Serial.read(); // limpa lixo do buffer serial
 
-    // Pergunta COM TIMEOUT. Sem resposta em 8s, segue sem apagar nada.
-    // Critico: com o prompt() bloqueante o setup travava aqui esperando o
-    // monitor serial, e o loop() -- que le o switch e o botao -- nunca rodava.
-    // Padrao seguro: so apaga com um "s" deliberado.
-    if (promptTimeout("Apagar cadastros? [s|n] (8s)", 8000).startsWith("s")) {
-        recognition.deleteAll();
-        Serial.println("Apagado.");
-    }
+  // Pergunta COM TIMEOUT. Sem resposta em 8s, segue sem apagar nada.
+  // Critico: com o prompt() bloqueante o setup travava aqui esperando o
+  // monitor serial, e o loop() -- que le o switch e o botao -- nunca rodava.
+  // Padrao seguro: so apaga com um "s" deliberado.
+  if (promptTimeout("Apagar cadastros? [s|n] (8s)", 8000).startsWith("s")) {
+    recognition.deleteAll();
+    Serial.println("Apagado.");
+  }
 
-    Serial.println();
-    Serial.println("COMANDOS:");
-    Serial.println("  c = cadastrar rosto");
-    Serial.println("  r = MODO CONTINUO (imprime similaridade)");
-    Serial.println("  p = pausar (feed continua rodando)");
-    Serial.println("  d = listar cadastrados");
-    Serial.println("  z = zerar pico de nitidez (use ao rosquear a lente)");
-    Serial.println("  t = testar reconhecimento (votacao com early-exit)");
-    Serial.println("  m = multiplos enrolls (com gate de nitidez)");
-    Serial.println("  l = testar luz (varredura de duty x leitura do LDR)");
-    Serial.println("  s = dormir agora (deep sleep por software)");
-    Serial.println();
-    Serial.println("BOTAO  GPIO21: aperte para iniciar reconhecimento");
-    Serial.println("SWITCH GPIO14: fechado = dorme | aberto = acorda");
-    Serial.println("LDR    GPIO2  | COB/MOSFET GPIO42 | LED verde GPIO48");
-    Serial.println();
+  Serial.println();
+  Serial.println("COMANDOS:");
+  Serial.println("  c = cadastrar rosto");
+  Serial.println("  r = MODO CONTINUO (imprime similaridade)");
+  Serial.println("  p = pausar (feed continua rodando)");
+  Serial.println("  d = listar cadastrados");
+  Serial.println("  z = zerar pico de nitidez (use ao rosquear a lente)");
+  Serial.println("  t = testar reconhecimento (votacao com early-exit)");
+  Serial.println("  m = multiplos enrolls (com gate de nitidez)");
+  Serial.println("  l = testar luz (varredura de duty x leitura do LDR)");
+  Serial.println("  s = dormir agora (deep sleep por software)");
+  Serial.println();
+  Serial.println("BOTAO  GPIO21: aperte para iniciar reconhecimento");
+  Serial.println("SWITCH GPIO14: fechado = dorme | aberto = acorda");
+  Serial.println("LDR    GPIO2  | COB/MOSFET GPIO42 | LED verde GPIO48");
+  Serial.println();
 }
 
 // ==================== LOOP ====================
 void loop() {
 
-    // Switch fechado (LOW) = dormir. O segundo digitalRead apos 50ms e o
-    // debounce: filtra o repique mecanico do contato.
-    if (digitalRead(pinoDeepSleep) == LOW) {
-        delay(50);
-        if (digitalRead(pinoDeepSleep) == LOW)
-            entrarEmDeepSleep();   // nao retorna
+  // Switch fechado (LOW) = dormir. O segundo digitalRead apos 50ms e o
+  // debounce: filtra o repique mecanico do contato.
+  if (digitalRead(pinoDeepSleep) == LOW) {
+    delay(50);
+    if (digitalRead(pinoDeepSleep) == LOW)
+      entrarEmDeepSleep(); // nao retorna
+  }
+
+  // Comandos da web.
+  if (httpCommand != "") {
+    String cmd = httpCommand;
+    httpCommand = "";
+    if (cmd.startsWith("c")) {
+      modoContinuo = false;
+      doEnroll(ALVO_NOME);
+    } else if (cmd.startsWith("r")) {
+      modoContinuo = true;
+      Serial.println(">> MODO CONTINUO (Web)");
+    } else if (cmd.startsWith("p")) {
+      modoContinuo = false;
+      Serial.println(">> PAUSADO (Web)");
+    } else if (cmd.startsWith("t")) {
+      runTentativa();
     }
+  }
 
-    // Comandos da web.
-    if (httpCommand != "") {
-        String cmd = httpCommand;
-        httpCommand = "";
-        if      (cmd.startsWith("c")) { modoContinuo = false; doEnroll(ALVO_NOME); }
-        else if (cmd.startsWith("r")) { modoContinuo = true;  Serial.println(">> MODO CONTINUO (Web)"); }
-        else if (cmd.startsWith("p")) { modoContinuo = false; Serial.println(">> PAUSADO (Web)"); }
-        else if (cmd.startsWith("t")) { runTentativa(); }
+  // Comandos do monitor serial.
+  if (Serial.available()) {
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
+
+    if (cmd.startsWith("c")) {
+      modoContinuo = false;
+      doEnroll();
+    } else if (cmd.startsWith("r")) {
+      modoContinuo = true;
+      Serial.println(">> MODO CONTINUO");
+    } else if (cmd.startsWith("p")) {
+      modoContinuo = false;
+      Serial.println(">> PAUSADO (feed ativo)");
+    } else if (cmd.startsWith("d")) {
+      recognition.dump();
+    } else if (cmd.startsWith("z")) {
+      sharpMax = 0;
+      Serial.println(">> pico zerado");
+    } else if (cmd.startsWith("t")) {
+      runTentativa();
+    } else if (cmd.startsWith("m")) {
+      modoContinuo = false;
+      enrollMultiplo(6);
+    } else if (cmd.startsWith("l")) {
+      modoContinuo = false;
+      testeLuz();
+    } else if (cmd.startsWith("s")) {
+      entrarEmDeepSleep();
     }
+  }
 
-    // Comandos do monitor serial.
-    if (Serial.available()) {
-        String cmd = Serial.readStringUntil('\n');
-        cmd.trim();
+  // Botao: dispara UMA vez por aperto, por deteccao de BORDA DE DESCIDA.
+  // Sem isso, segurar o botao dispararia tentativas em sequencia.
+  // 'static' faz a variavel sobreviver entre chamadas do loop().
+  static bool botaoUltimoEstado = HIGH;
+  bool botaoAtual = digitalRead(iniciarReconhecimento);
 
-        if      (cmd.startsWith("c")) { modoContinuo = false; doEnroll(); }
-        else if (cmd.startsWith("r")) { modoContinuo = true;  Serial.println(">> MODO CONTINUO"); }
-        else if (cmd.startsWith("p")) { modoContinuo = false; Serial.println(">> PAUSADO (feed ativo)"); }
-        else if (cmd.startsWith("d")) { recognition.dump(); }
-        else if (cmd.startsWith("z")) { sharpMax = 0; Serial.println(">> pico zerado"); }
-        else if (cmd.startsWith("t")) { runTentativa(); }
-        else if (cmd.startsWith("m")) { modoContinuo = false; enrollMultiplo(6); }
-        else if (cmd.startsWith("l")) { modoContinuo = false; testeLuz(); }
-        else if (cmd.startsWith("s")) { entrarEmDeepSleep(); }
-    }
+  if (botaoUltimoEstado == HIGH && botaoAtual == LOW) {
+    runTentativa();
+  }
+  botaoUltimoEstado = botaoAtual;
 
-    // Botao: dispara UMA vez por aperto, por deteccao de BORDA DE DESCIDA.
-    // Sem isso, segurar o botao dispararia tentativas em sequencia.
-    // 'static' faz a variavel sobreviver entre chamadas do loop().
-    static bool botaoUltimoEstado = HIGH;
-    bool botaoAtual = digitalRead(iniciarReconhecimento);
+  // Captura + publica SEMPRE, mesmo pausado: o feed precisa ficar vivo
+  // pra voce conseguir focar a lente olhando o navegador.
+  if (!camera.capture().isOk()) {
+    delay(100);
+    return;
+  }
 
-    if (botaoUltimoEstado == HIGH && botaoAtual == LOW) {
-        runTentativa();
-    }
-    botaoUltimoEstado = botaoAtual;
+  publishFrame(camera.frame->buf, camera.frame->len);
 
-    // Captura + publica SEMPRE, mesmo pausado: o feed precisa ficar vivo
-    // pra voce conseguir focar a lente olhando o navegador.
-    if (!camera.capture().isOk()) {
-        delay(100);
-        return;
-    }
+  // Pico de nitidez: gire a lente devagar buscando MAXIMIZAR este valor.
+  uint32_t sharp = camera.frame->len;
+  if (sharp > sharpMax)
+    sharpMax = sharp;
 
-    publishFrame(camera.frame->buf, camera.frame->len);
+  if (modoContinuo)
+    runRecognition();
+  else
+    snprintf(
+        g_info, sizeof(g_info),
+        "{\"face\":0,\"sharp\":%u,\"peak\":%u,\"ldr\":%u,\"name\":\"(pausado)"
+        "\",\"sim\":\"-\",\"last_acc\":\"%s\",\"last_name\":\"%s\"}",
+        (unsigned)sharp, (unsigned)sharpMax, (unsigned)lerLDR(),
+        lastAccType.c_str(), lastAccName.c_str());
 
-    // Pico de nitidez: gire a lente devagar buscando MAXIMIZAR este valor.
-    uint32_t sharp = camera.frame->len;
-    if (sharp > sharpMax) sharpMax = sharp;
-
-    if (modoContinuo)
-        runRecognition();
-    else
-        snprintf(g_info, sizeof(g_info),
-                 "{\"face\":0,\"sharp\":%u,\"peak\":%u,\"ldr\":%u,\"name\":\"(pausado)\",\"sim\":\"-\",\"last_acc\":\"%s\",\"last_name\":\"%s\"}",
-                 (unsigned) sharp, (unsigned) sharpMax, (unsigned) lerLDR(), lastAccType.c_str(), lastAccName.c_str());
-
-    delay(10);
+  delay(10);
 }
 
 /**
@@ -823,39 +879,45 @@ void loop() {
  * Nao aciona nada: e diagnostico, nao decisao.
  */
 void runRecognition() {
-    uint32_t sharp = camera.frame->len;
-    uint16_t ldr   = lerLDR();
+  uint32_t sharp = camera.frame->len;
+  uint16_t ldr = lerLDR();
 
-    // Sem rosto na cena.
-    if (!recognition.detect().isOk()) {
-        snprintf(g_info, sizeof(g_info),
-                 "{\"face\":0,\"sharp\":%u,\"peak\":%u,\"ldr\":%u,\"name\":\"-\",\"sim\":\"-\",\"last_acc\":\"%s\",\"last_name\":\"%s\"}",
-                 (unsigned) sharp, (unsigned) sharpMax, (unsigned) ldr, lastAccType.c_str(), lastAccName.c_str());
-        return;
-    }
-
-    // Rosto detectado, mas sem match (face:1, name:"?").
-    if (!recognition.recognize().isOk()) {
-        snprintf(g_info, sizeof(g_info),
-                 "{\"face\":1,\"sharp\":%u,\"peak\":%u,\"ldr\":%u,\"name\":\"?\",\"sim\":\"-\",\"last_acc\":\"%s\",\"last_name\":\"%s\"}",
-                 (unsigned) sharp, (unsigned) sharpMax, (unsigned) ldr, lastAccType.c_str(), lastAccName.c_str());
-        return;
-    }
-
-    const char* name = recognition.match.name.c_str();
-    float       sim  = recognition.match.similarity;
-
+  // Sem rosto na cena.
+  if (!recognition.detect().isOk()) {
     snprintf(g_info, sizeof(g_info),
-             "{\"face\":1,\"sharp\":%u,\"peak\":%u,\"ldr\":%u,\"name\":\"%s\",\"sim\":\"%.4f\",\"last_acc\":\"%s\",\"last_name\":\"%s\"}",
-             (unsigned) sharp, (unsigned) sharpMax, (unsigned) ldr, name, sim, lastAccType.c_str(), lastAccName.c_str());
+             "{\"face\":0,\"sharp\":%u,\"peak\":%u,\"ldr\":%u,\"name\":\"-\","
+             "\"sim\":\"-\",\"last_acc\":\"%s\",\"last_name\":\"%s\"}",
+             (unsigned)sharp, (unsigned)sharpMax, (unsigned)ldr,
+             lastAccType.c_str(), lastAccName.c_str());
+    return;
+  }
 
-    // Throttle: imprimir a cada frame inundaria o serial e atrasaria o stream.
-    if (millis() - lastPrint > 400) {
-        lastPrint = millis();
-        Serial.printf("MATCH: %-10s sim=%.4f  sharp=%u  ldr=%u  (%dms)\n",
-                      name, sim, (unsigned) sharp, (unsigned) ldr,
-                      recognition.benchmark.millis());
-    }
+  // Rosto detectado, mas sem match (face:1, name:"?").
+  if (!recognition.recognize().isOk()) {
+    snprintf(g_info, sizeof(g_info),
+             "{\"face\":1,\"sharp\":%u,\"peak\":%u,\"ldr\":%u,\"name\":\"?\","
+             "\"sim\":\"-\",\"last_acc\":\"%s\",\"last_name\":\"%s\"}",
+             (unsigned)sharp, (unsigned)sharpMax, (unsigned)ldr,
+             lastAccType.c_str(), lastAccName.c_str());
+    return;
+  }
+
+  const char *name = recognition.match.name.c_str();
+  float sim = recognition.match.similarity;
+
+  snprintf(g_info, sizeof(g_info),
+           "{\"face\":1,\"sharp\":%u,\"peak\":%u,\"ldr\":%u,\"name\":\"%s\","
+           "\"sim\":\"%.4f\",\"last_acc\":\"%s\",\"last_name\":\"%s\"}",
+           (unsigned)sharp, (unsigned)sharpMax, (unsigned)ldr, name, sim,
+           lastAccType.c_str(), lastAccName.c_str());
+
+  // Throttle: imprimir a cada frame inundaria o serial e atrasaria o stream.
+  if (millis() - lastPrint > 400) {
+    lastPrint = millis();
+    Serial.printf("MATCH: %-10s sim=%.4f  sharp=%u  ldr=%u  (%dms)\n", name,
+                  sim, (unsigned)sharp, (unsigned)ldr,
+                  recognition.benchmark.millis());
+  }
 }
 
 /**
@@ -866,53 +928,54 @@ void runRecognition() {
  * tenta evitar.
  */
 void doEnroll(String defaultName) {
-    String name = defaultName;
-    if (name == "") {
-        name = prompt("Nome:");
-    }
+  String name = defaultName;
+  if (name == "") {
+    name = prompt("Nome:");
+  }
 
-    analogWrite(pinoLuz, dutyLuz);   // acende no duty aprendido
+  analogWrite(pinoLuz, dutyLuz); // acende no duty aprendido
 
-    Serial.println("Posicione o rosto. Cadastrando em 3s...");
-    for (int i = 0; i < 30; i++) {   // 30 x 100ms: tempo de sobra pro controle convergir
-        if (camera.capture().isOk()) {
-            publishFrame(camera.frame->buf, camera.frame->len);
-            ajustaLuz();
-        }
-        delay(100);
+  Serial.println("Posicione o rosto. Cadastrando em 3s...");
+  for (int i = 0; i < 30;
+       i++) { // 30 x 100ms: tempo de sobra pro controle convergir
+    if (camera.capture().isOk()) {
+      publishFrame(camera.frame->buf, camera.frame->len);
+      ajustaLuz();
     }
+    delay(100);
+  }
 
-    if (!camera.capture().isOk()) {
-        Serial.println("ERRO: captura falhou");
-        analogWrite(pinoLuz, 0);
-        return;
-    }
-    publishFrame(camera.frame->buf, camera.frame->len);
-
-    // Gate no cadastro e o ponto mais critico do sistema: um embedding
-    // gerado de rosto borrado contamina TODAS as comparacoes futuras.
-    const char* motivo = "";
-    if (!frameOk(motivo)) {
-        Serial.printf("ERRO: frame ruim para cadastro (%s). Tente de novo.\n", motivo);
-        analogWrite(pinoLuz, 0);
-        return;
-    }
-
-    if (!recognition.detect().isOk()) {
-        Serial.println("ERRO: nenhum rosto detectado");
-        analogWrite(pinoLuz, 0);
-        return;
-    }
-
-    if (recognition.enroll(name).isOk()) {
-        Serial.print("OK, cadastrado: ");
-        Serial.println(name);
-    }
-    else {
-        Serial.println(recognition.exception.toString());
-    }
-
+  if (!camera.capture().isOk()) {
+    Serial.println("ERRO: captura falhou");
     analogWrite(pinoLuz, 0);
+    return;
+  }
+  publishFrame(camera.frame->buf, camera.frame->len);
+
+  // Gate no cadastro e o ponto mais critico do sistema: um embedding
+  // gerado de rosto borrado contamina TODAS as comparacoes futuras.
+  const char *motivo = "";
+  if (!frameOk(motivo)) {
+    Serial.printf("ERRO: frame ruim para cadastro (%s). Tente de novo.\n",
+                  motivo);
+    analogWrite(pinoLuz, 0);
+    return;
+  }
+
+  if (!recognition.detect().isOk()) {
+    Serial.println("ERRO: nenhum rosto detectado");
+    analogWrite(pinoLuz, 0);
+    return;
+  }
+
+  if (recognition.enroll(name).isOk()) {
+    Serial.print("OK, cadastrado: ");
+    Serial.println(name);
+  } else {
+    Serial.println(recognition.exception.toString());
+  }
+
+  analogWrite(pinoLuz, 0);
 }
 
 /**
@@ -924,65 +987,73 @@ void doEnroll(String defaultName) {
  * infinito se a condicao estiver ruim demais.
  */
 void enrollMultiplo(int alvo) {
-    String nome = prompt("Nome para cadastro multiplo:");
+  String nome = prompt("Nome para cadastro multiplo:");
 
-    Serial.printf(">> Multi-enroll de '%s' (meta: %d capturas boas)\n", nome.c_str(), alvo);
-    int ok         = 0;
-    int tentativas = 0;
-    const int MAX_TENTATIVAS = alvo * 8;   // teto folgado: o gate rejeita bastante
-    const char* motivo = "";
+  Serial.printf(">> Multi-enroll de '%s' (meta: %d capturas boas)\n",
+                nome.c_str(), alvo);
+  int ok = 0;
+  int tentativas = 0;
+  const int MAX_TENTATIVAS = alvo * 8; // teto folgado: o gate rejeita bastante
+  const char *motivo = "";
 
-    analogWrite(pinoLuz, dutyLuz);   // acende no duty aprendido
+  analogWrite(pinoLuz, dutyLuz); // acende no duty aprendido
 
-    while (ok < alvo) {
-        if (tentativas >= MAX_TENTATIVAS) {
-            Serial.printf(">> Desisti: so %d/%d salvas em %d tentativas\n",
-                          ok, alvo, tentativas);
-            analogWrite(pinoAzul, 0);
-            analogWrite(pinoLuz, 0);
-            return;
-        }
-        tentativas++;
+  while (ok < alvo) {
+    if (tentativas >= MAX_TENTATIVAS) {
+      Serial.printf(">> Desisti: so %d/%d salvas em %d tentativas\n", ok, alvo,
+                    tentativas);
+      analogWrite(pinoAzul, 0);
+      analogWrite(pinoLuz, 0);
+      return;
+    }
+    tentativas++;
 
-        Serial.printf("   captura %d/%d (tentativa %d) - posicione o rosto e fique PARADO...\n",
-                      ok + 1, alvo, tentativas);
+    Serial.printf("   captura %d/%d (tentativa %d) - posicione o rosto e fique "
+                  "PARADO...\n",
+                  ok + 1, alvo, tentativas);
 
-        // ~2s de espera entre capturas, mantendo feed, LED e controle vivos.
-        for (int k = 0; k < 20; k++) {
-            if (camera.capture().isOk()) {
-                publishFrame(camera.frame->buf, camera.frame->len);
-            }
-            ajustaLuz();
-            // Em vez de delay(100) seco, laco de 100ms pulsando o LED.
-            unsigned long tEspera = millis();
-            while (millis() - tEspera < 100) {
-                pulsaLEDEspera();
-                delay(5);
-            }
-        }
-
-        if (!camera.capture().isOk()) { Serial.println("   captura falhou, repetindo"); continue; }
+    // ~2s de espera entre capturas, mantendo feed, LED e controle vivos.
+    for (int k = 0; k < 20; k++) {
+      if (camera.capture().isOk()) {
         publishFrame(camera.frame->buf, camera.frame->len);
-
-        if (!frameOk(motivo)) {
-            Serial.printf("   descartei (%s), repetindo\n", motivo);
-            continue;
-        }
-
-        if (!recognition.detect().isOk()) { Serial.println("   sem rosto, repetindo"); continue; }
-
-        if (recognition.enroll(nome).isOk()) {
-            ok++;
-            Serial.printf("   OK (%d/%d boas)\n", ok, alvo);
-        } else {
-            Serial.println(recognition.exception.toString());
-        }
+      }
+      ajustaLuz();
+      // Em vez de delay(100) seco, laco de 100ms pulsando o LED.
+      unsigned long tEspera = millis();
+      while (millis() - tEspera < 100) {
+        pulsaLEDEspera();
+        delay(5);
+      }
     }
 
-    Serial.printf(">> Multi-enroll concluido: %d/%d capturas boas para '%s'\n",
-                  ok, alvo, nome.c_str());
-    analogWrite(pinoAzul, 0);
-    analogWrite(pinoLuz, 0);
+    if (!camera.capture().isOk()) {
+      Serial.println("   captura falhou, repetindo");
+      continue;
+    }
+    publishFrame(camera.frame->buf, camera.frame->len);
+
+    if (!frameOk(motivo)) {
+      Serial.printf("   descartei (%s), repetindo\n", motivo);
+      continue;
+    }
+
+    if (!recognition.detect().isOk()) {
+      Serial.println("   sem rosto, repetindo");
+      continue;
+    }
+
+    if (recognition.enroll(nome).isOk()) {
+      ok++;
+      Serial.printf("   OK (%d/%d boas)\n", ok, alvo);
+    } else {
+      Serial.println(recognition.exception.toString());
+    }
+  }
+
+  Serial.printf(">> Multi-enroll concluido: %d/%d capturas boas para '%s'\n",
+                ok, alvo, nome.c_str());
+  analogWrite(pinoAzul, 0);
+  analogWrite(pinoLuz, 0);
 }
 
 /**
@@ -991,17 +1062,17 @@ void enrollMultiplo(int alvo) {
  * acabou de digitar o comando e portanto esta no monitor serial.
  */
 String prompt(String message) {
-    String answer;
-    do {
-        Serial.print(message);
-        Serial.print(" ");
-        while (!Serial.available())
-            delay(1);
-        answer = Serial.readStringUntil('\n');
-        answer.trim();
-    } while (answer.length() == 0);   // enter vazio -> repete a pergunta
-    Serial.println(answer);
-    return answer;
+  String answer;
+  do {
+    Serial.print(message);
+    Serial.print(" ");
+    while (!Serial.available())
+      delay(1);
+    answer = Serial.readStringUntil('\n');
+    answer.trim();
+  } while (answer.length() == 0); // enter vazio -> repete a pergunta
+  Serial.println(answer);
+  return answer;
 }
 
 /**
@@ -1010,21 +1081,20 @@ String prompt(String message) {
  * "nao faca nada"), por isso nao ha o laco de insistencia do prompt().
  */
 String promptTimeout(String message, uint32_t ms) {
-    Serial.print(message);
-    Serial.print(" ");
+  Serial.print(message);
+  Serial.print(" ");
 
-    uint32_t t0 = millis();
-    while (!Serial.available()) {
-        if (millis() - t0 > ms) {
-            Serial.println("  (sem resposta, seguindo)");
-            return "";
-        }
-        delay(10);
+  uint32_t t0 = millis();
+  while (!Serial.available()) {
+    if (millis() - t0 > ms) {
+      Serial.println("  (sem resposta, seguindo)");
+      return "";
     }
+    delay(10);
+  }
 
-    String answer = Serial.readStringUntil('\n');
-    answer.trim();
-    Serial.println(answer);
-    return answer;
+  String answer = Serial.readStringUntil('\n');
+  answer.trim();
+  Serial.println(answer);
+  return answer;
 }
-
