@@ -150,7 +150,7 @@ enum Veredito { PENDENTE, APROVADO, NEGADO, EXPIROU };
 String prompt(String message);
 String promptTimeout(String message, uint32_t ms);
 void entrarEmDeepSleep();
-void doEnroll();
+void doEnroll(String defaultName = "");
 void runRecognition();
 void enrollMultiplo(int alvo);
 void publishFrame(const uint8_t *buf, size_t len);
