@@ -96,39 +96,35 @@
 
         <!-- Camera Controls -->
         <div class="controls-grid" id="controlsGrid">
-          <button class="ctrl-btn" id="btnDetection" onclick="toggleDetection()" title="Ativar/Desativar detecção de rostos">
+          <button class="ctrl-btn" id="btnContinuous" onclick="toggleContinuous()" title="Ativar Inspecção Contínua">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-            Detecção
+            Inspecionar
           </button>
-          <button class="ctrl-btn" id="btnRecognition" onclick="toggleRecognition()" title="Ativar/Desativar reconhecimento facial">
+          <button class="ctrl-btn" id="btnTestAccess" onclick="testAccess()" title="Testar acesso (Tentativa)">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-            Reconhecimento
+            Testar Acesso
           </button>
-          <button class="ctrl-btn enroll-btn" id="btnEnroll" onclick="toggleEnroll()" title="Cadastrar novo rosto">
+          <button class="ctrl-btn enroll-btn" id="btnEnroll" onclick="startEnroll()" title="Cadastrar rosto">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
-            Cadastrar Rosto
-          </button>
-          <button class="ctrl-btn" onclick="capturePhoto()" title="Tirar uma foto">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-            Capturar Foto
+            Cadastrar
           </button>
         </div>
 
         <!-- Stats Bar -->
         <div class="stats-bar" id="statsBar">
           <div class="stat-item">
-            <span class="stat-val" id="statFPS">--</span>
-            <span class="stat-lbl">FPS</span>
+            <span class="stat-val" id="statSharp">--</span>
+            <span class="stat-lbl">Nitidez</span>
           </div>
           <div class="stat-divider"></div>
           <div class="stat-item">
-            <span class="stat-val" id="statFaces">0</span>
-            <span class="stat-lbl">Rostos Detectados</span>
+            <span class="stat-val" id="statPeak">--</span>
+            <span class="stat-lbl">Pico Nitidez</span>
           </div>
           <div class="stat-divider"></div>
           <div class="stat-item">
-            <span class="stat-val" id="statTotal">0</span>
-            <span class="stat-lbl">Total de Acessos</span>
+            <span class="stat-val" id="statLDR">--</span>
+            <span class="stat-lbl">Luz (LDR)</span>
           </div>
         </div>
       </div>
@@ -211,23 +207,7 @@
   <!-- TOAST NOTIFICATION -->
   <div class="toast-container" id="toastContainer"></div>
 
-  <!-- PHOTO MODAL -->
-  <div class="modal-overlay" id="photoModal" style="display:none;" onclick="closeModal()">
-    <div class="modal-content" onclick="event.stopPropagation()">
-      <div class="modal-header">
-        <h3>Foto Capturada</h3>
-        <button class="modal-close" onclick="closeModal()">×</button>
-      </div>
-      <img id="modalImg" src="" alt="Foto capturada" />
-      <div class="modal-footer">
-        <a id="modalDownload" href="" download="capture.jpg" class="btn-connect">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Salvar Foto
-        </a>
-        <button class="btn-disconnect" onclick="closeModal()">Fechar</button>
-      </div>
-    </div>
-  </div>
+
 
   <script src="app.js"></script>
 </body>

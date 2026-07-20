@@ -14,16 +14,14 @@
 const state = {
   esp32Ip: localStorage.getItem('esp32ip') || '',
   connected: false,
-  detectionOn: false,
-  recognitionOn: false,
-  enrolling: false,
+  isContinuous: false,
   logEntries: JSON.parse(localStorage.getItem('faceLogs') || '[]'),
   currentFilter: 'all',
   totalGranted: 0,
   totalDenied: 0,
-  statusPollInterval: null,
-  simulateFaceRecognition: false, // true apenas para demo/testes
+  statusPollInterval: null
 };
+let lastAccessStateStr = "-";
 
 /* ===================== INIT ===================== */
 window.addEventListener('DOMContentLoaded', () => {
@@ -143,11 +141,10 @@ function setConnectedUI(connected) {
     liveBadge.innerHTML = '<span class="live-dot"></span> OFFLINE';
     btnConnect.style.display = 'flex';
     btnDisconnect.style.display = 'none';
-    document.getElementById('statFPS').textContent = '--';
-    document.getElementById('statFaces').textContent = '0';
-    state.detectionOn = false;
-    state.recognitionOn = false;
-    state.enrolling = false;
+    document.getElementById('statSharp').textContent = '--';
+    document.getElementById('statPeak').textContent = '--';
+    document.getElementById('statLDR').textContent = '--';
+    state.isContinuous = false;
     updateControlButtons();
   }
 }
@@ -167,7 +164,7 @@ function clearStatusPoll() {
 
 async function pollStatus(ip) {
   try {
-    const res = await fetch(`http://${ip}/status`, { signal: AbortSignal.timeout(3000) });
+    const res = await fetch(`http://${ip}/info`, { signal: AbortSignal.timeout(3000) });
     if (!res.ok) throw new Error('Not OK');
     const data = await res.json();
     applyStatusToUI(data);
@@ -183,182 +180,74 @@ async function pollStatus(ip) {
   }
 }
 
-function applyStatusToUI(status) {
-  if (status.face_detect !== undefined) {
-    state.detectionOn = !!status.face_detect;
-  }
-  if (status.face_recognize !== undefined) {
-    state.recognitionOn = !!status.face_recognize;
-  }
-  if (status.face_enroll !== undefined) {
-    state.enrolling = !!status.face_enroll;
-  }
+function applyStatusToUI(data) {
+  document.getElementById('statSharp').textContent = data.sharp || '0';
+  document.getElementById('statPeak').textContent = data.peak || '0';
+  document.getElementById('statLDR').textContent = data.ldr || '0';
+
+  state.isContinuous = (data.name !== "(pausado)");
   updateControlButtons();
+
+  if (data.last_acc && data.last_acc !== lastAccessStateStr) {
+    if (data.last_acc === 'granted') {
+      registerAccessEvent(true, `Rosto: ${data.last_name}`);
+    } else if (data.last_acc === 'denied') {
+      registerAccessEvent(false, `Motivo: ${data.last_name}`);
+    }
+    lastAccessStateStr = data.last_acc;
+  }
 }
 
 /* ===================== CAMERA CONTROLS ===================== */
-async function sendControl(variable, value) {
+async function sendControl(cmd) {
   if (!state.connected) {
     showToast('Conecte ao ESP32 primeiro!', 'warning');
     return false;
   }
   try {
-    const url = `http://${state.esp32Ip}/control?var=${variable}&val=${value}`;
+    const url = `http://${state.esp32Ip}/control?cmd=${cmd}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
     return res.ok;
   } catch (e) {
-    showToast(`Erro ao enviar comando: ${variable}`, 'error');
+    showToast(`Erro ao enviar comando: ${cmd}`, 'error');
     return false;
   }
 }
 
-async function toggleDetection() {
-  const newVal = state.detectionOn ? 0 : 1;
-  const ok = await sendControl('face_detect', newVal);
+async function toggleContinuous() {
+  const cmd = state.isContinuous ? 'p' : 'r';
+  const ok = await sendControl(cmd);
   if (ok) {
-    state.detectionOn = !!newVal;
-    if (!newVal) state.recognitionOn = false;
+    state.isContinuous = !state.isContinuous;
     updateControlButtons();
     showToast(
-      state.detectionOn ? 'Detecção de rostos ativada' : 'Detecção desativada',
-      state.detectionOn ? 'success' : 'info'
+      state.isContinuous ? 'Modo Contínuo Ativado' : 'Inspeção Pausada',
+      state.isContinuous ? 'success' : 'info'
     );
   }
 }
 
-async function toggleRecognition() {
-  const newVal = state.recognitionOn ? 0 : 1;
-  const ok = await sendControl('face_recognize', newVal);
+async function testAccess() {
+  const ok = await sendControl('t');
   if (ok) {
-    state.recognitionOn = !!newVal;
-    if (newVal) state.detectionOn = true;
-    updateControlButtons();
-    showToast(
-      state.recognitionOn ? 'Reconhecimento facial ativado' : 'Reconhecimento desativado',
-      state.recognitionOn ? 'success' : 'info'
-    );
-    if (state.recognitionOn) {
-      // Start simulating recognition events for demonstration
-      startRecognitionMonitor();
-    } else {
-      stopRecognitionMonitor();
-    }
+    showToast('Iniciando tentativa de acesso...', 'info');
   }
 }
 
-async function toggleEnroll() {
-  const newVal = state.enrolling ? 0 : 1;
-  const ok = await sendControl('face_enroll', newVal);
+async function startEnroll() {
+  const ok = await sendControl('c');
   if (ok) {
-    state.enrolling = !!newVal;
-    updateControlButtons();
-    showToast(
-      state.enrolling ? '📸 Cadastramento iniciado! Olhe para a câmera.' : 'Cadastramento finalizado',
-      state.enrolling ? 'warning' : 'success'
-    );
-    if (state.enrolling) {
-      addLogEntry('info', 'Cadastramento iniciado', 'Aguardando captura de rosto');
-    }
+    showToast('📸 Cadastramento iniciado! Olhe para a câmera.', 'warning');
+    addLogEntry('info', 'Cadastramento iniciado', 'Aguardando rosto');
   }
 }
 
 function updateControlButtons() {
-  const btnD = document.getElementById('btnDetection');
-  const btnR = document.getElementById('btnRecognition');
-  const btnE = document.getElementById('btnEnroll');
-
-  btnD.className = 'ctrl-btn' + (state.detectionOn ? ' active' : '');
-  btnR.className = 'ctrl-btn' + (state.recognitionOn ? ' active-green' : '');
-  btnE.className = 'ctrl-btn enroll-btn' + (state.enrolling ? ' enrolling' : '');
+  const btnC = document.getElementById('btnContinuous');
+  if(btnC) btnC.className = 'ctrl-btn' + (state.isContinuous ? ' active' : '');
 }
 
-/* ===================== PHOTO CAPTURE ===================== */
-async function capturePhoto() {
-  if (!state.connected) {
-    showToast('Conecte ao ESP32 primeiro!', 'warning');
-    return;
-  }
-  try {
-    showToast('Capturando foto...', 'info');
-    const url = `http://${state.esp32Ip}/capture?_cb=${Date.now()}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-    if (!res.ok) throw new Error('Falha na captura');
-    const blob = await res.blob();
-    const imgUrl = URL.createObjectURL(blob);
-    openPhotoModal(imgUrl);
-    addLogEntry('info', 'Foto capturada', `Imagem salva às ${getTimestamp()}`);
-  } catch (e) {
-    showToast('Erro ao capturar foto. Tente novamente.', 'error');
-  }
-}
 
-function openPhotoModal(src) {
-  document.getElementById('modalImg').src = src;
-  document.getElementById('modalDownload').href = src;
-  document.getElementById('photoModal').style.display = 'flex';
-}
-
-function closeModal() {
-  document.getElementById('photoModal').style.display = 'none';
-}
-
-/* ===================== RECOGNITION MONITOR ===================== */
-// This polls the ESP32 status endpoint to detect access granted/denied
-// events. In a real system, the ESP32 would push events; here we 
-// watch the status for changes.
-let recognitionMonitorInterval = null;
-let lastAccessState = null;
-
-function startRecognitionMonitor() {
-  stopRecognitionMonitor();
-  recognitionMonitorInterval = setInterval(async () => {
-    if (!state.connected || !state.recognitionOn) return;
-    try {
-      // Poll the status endpoint — actual event detection would require
-      // a dedicated ESP32 endpoint like /access_status
-      const res = await fetch(`http://${state.esp32Ip}/status`, {
-        signal: AbortSignal.timeout(2000)
-      });
-      if (res.ok) {
-        // Check access status via a dedicated endpoint if available
-        await checkAccessStatus();
-      }
-    } catch (e) { /* ignore */ }
-  }, 2000);
-}
-
-function stopRecognitionMonitor() {
-  if (recognitionMonitorInterval) {
-    clearInterval(recognitionMonitorInterval);
-    recognitionMonitorInterval = null;
-  }
-}
-
-async function checkAccessStatus() {
-  // Try to fetch access status from a custom endpoint
-  // The ESP32 code sets Autorizacao_Acesso variable,
-  // but doesn't expose it via HTTP by default.
-  // We try /access endpoint:
-  try {
-    const res = await fetch(`http://${state.esp32Ip}/access`, {
-      signal: AbortSignal.timeout(1500)
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.granted !== undefined && data.granted !== lastAccessState) {
-        lastAccessState = data.granted;
-        if (data.granted) {
-          const faceId = data.face_id || '?';
-          registerAccessEvent(true, `ID de Rosto: ${faceId}`);
-        } else {
-          registerAccessEvent(false, 'Rosto não reconhecido');
-        }
-      }
-    }
-  } catch (e) {
-    // /access endpoint not available — use manual log button instead
-  }
-}
 
 /* ===================== MANUAL LOG (for demonstration) ===================== */
 // Since the ESP32 doesn't expose access events via HTTP by default,
@@ -546,8 +435,6 @@ function showToast(message, type = 'info') {
 
 /* ===================== KEYBOARD SHORTCUTS ===================== */
 document.addEventListener('keydown', (e) => {
-  // Escape: close modal
-  if (e.key === 'Escape') closeModal();
   // Ctrl+Enter: connect/disconnect
   if (e.ctrlKey && e.key === 'Enter') {
     if (state.connected) disconnectFromESP();
