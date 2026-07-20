@@ -167,7 +167,7 @@ bool modoContinuo = false; // 'r' liga: imprime similaridade a cada frame
 uint32_t sharpMax = 0;     // pico de nitidez ja visto (guia pra focar a lente)
 uint32_t lastPrint = 0;    // throttle do serial no modo continuo
 uint32_t ultimoSharp = 0;  // tamanho do frame anterior (detector de movimento)
-String httpCommand = "";   // comando recebido via web
+volatile char httpCommand = 0; // comando web atômico ('c', 'r', 'p', 't')
 String lastAccType = "-";  // "granted", "denied" ou "-"
 String lastAccName = "-";  // nome ou "desconhecido"
 
@@ -506,7 +506,7 @@ static esp_err_t controlHandler(httpd_req_t *req) {
   if (httpd_req_get_url_query_str(req, buf, sizeof(buf)) == ESP_OK) {
     char val[16];
     if (httpd_query_key_value(buf, "cmd", val, sizeof(val)) == ESP_OK) {
-      httpCommand = String(val);
+      httpCommand = val[0];
     }
   }
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
@@ -785,19 +785,19 @@ void loop() {
   }
 
   // Comandos da web.
-  if (httpCommand != "") {
-    String cmd = httpCommand;
-    httpCommand = "";
-    if (cmd.startsWith("c")) {
+  if (httpCommand != 0) {
+    char cmd = httpCommand;
+    httpCommand = 0;
+    if (cmd == 'c') {
       modoContinuo = false;
       doEnroll(ALVO_NOME);
-    } else if (cmd.startsWith("r")) {
+    } else if (cmd == 'r') {
       modoContinuo = true;
       Serial.println(">> MODO CONTINUO (Web)");
-    } else if (cmd.startsWith("p")) {
+    } else if (cmd == 'p') {
       modoContinuo = false;
       Serial.println(">> PAUSADO (Web)");
-    } else if (cmd.startsWith("t")) {
+    } else if (cmd == 't') {
       runTentativa();
     }
   }
