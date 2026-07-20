@@ -12,7 +12,7 @@
 
 /* ===================== STATE ===================== */
 const state = {
-  esp32Ip: localStorage.getItem('esp32ip') || '',
+  esp32Ip: localStorage.getItem('esp32ip') || (window.location.protocol.startsWith('http') ? window.location.host : ''),
   connected: false,
   isContinuous: false,
   logEntries: JSON.parse(localStorage.getItem('faceLogs') || '[]'),
@@ -28,6 +28,10 @@ window.addEventListener('DOMContentLoaded', () => {
   const savedIp = state.esp32Ip;
   if (savedIp) {
     document.getElementById('espIpInput').value = savedIp;
+    // Auto-conecta se o dashboard estiver sendo servido pelo próprio ESP32 (ou servidor local)
+    if (window.location.protocol.startsWith('http') && window.location.host === savedIp) {
+      setTimeout(connectToESP, 100);
+    }
   }
 
   // Restore logs from localStorage
@@ -63,19 +67,19 @@ function disconnectFromESP() {
 }
 
 function startStream(ip) {
-  const streamUrl = `http://${ip}:81/stream`;
+  // Se o usuário digitou uma porta no IP (ex: localhost:3000), usa ela. 
+  // Senão, usa a rota padrão /stream
+  const streamUrl = `http://${ip}/stream`;
+
   const img = document.getElementById('cameraStream');
   const placeholder = document.getElementById('cameraPlaceholder');
   const overlay = document.getElementById('cameraOverlay');
 
   img.onerror = () => {
-    // Try without port (some setups use port 80 for stream)
-    img.onerror = () => {
-      stopStream();
-      setConnectedUI(false);
-      showToast(`Não foi possível conectar ao stream.\nVerifique o IP e se o ESP32 está online.`, 'error');
-    };
-    img.src = `http://${ip}/stream`;
+    // Se falhar o stream de imagem pura, tenta reconectar
+    stopStream();
+    setConnectedUI(false);
+    showToast(`Não foi possível conectar ao stream.\nVerifique o IP e se o ESP32 está online.`, 'error');
   };
 
   img.onload = () => {
@@ -88,22 +92,22 @@ function startStream(ip) {
     addLogEntry('info', 'Câmera conectada', `Stream iniciado em ${streamUrl}`);
   };
 
+  // Dispara o carregamento do stream
   img.src = streamUrl;
 
-  // Start status polling even before stream confirms (to detect connection)
+  // Verifica a conexão de status
   checkStatusAndConnect(ip, streamUrl);
 }
 
 async function checkStatusAndConnect(ip, streamUrl) {
   try {
-    const res = await fetch(`http://${ip}/status`, { signal: AbortSignal.timeout(4000) });
+    const res = await fetch(`http://${ip}/info`, { signal: AbortSignal.timeout(4000) });
     if (res.ok) {
-      // Connection OK, stream will load
       const status = await res.json();
       applyStatusToUI(status);
     }
   } catch (e) {
-    // Will be caught by img.onerror
+    // Ignorado pois o img.onerror cuidará se o stream falhar
   }
 }
 
@@ -112,7 +116,8 @@ function stopStream() {
   const placeholder = document.getElementById('cameraPlaceholder');
   const overlay = document.getElementById('cameraOverlay');
 
-  img.src = '';
+  img.onerror = null; // Previne loop infinito
+  img.removeAttribute('src');
   img.style.display = 'none';
   overlay.style.display = 'none';
   placeholder.style.display = 'flex';
@@ -169,6 +174,7 @@ async function pollStatus(ip) {
     const data = await res.json();
     applyStatusToUI(data);
   } catch (e) {
+    console.error("Erro no pollStatus:", e);
     // If we lose connection
     if (state.connected) {
       stopStream();
@@ -244,7 +250,7 @@ async function startEnroll() {
 
 function updateControlButtons() {
   const btnC = document.getElementById('btnContinuous');
-  if(btnC) btnC.className = 'ctrl-btn' + (state.isContinuous ? ' active' : '');
+  if (btnC) btnC.className = 'ctrl-btn' + (state.isContinuous ? ' active' : '');
 }
 
 
@@ -262,15 +268,14 @@ function registerAccessEvent(granted, detail = '') {
   const type = granted ? 'granted' : 'denied';
   const label = granted ? 'Acesso Liberado' : 'Acesso Negado';
   const fullDetail = detail || (granted ? 'Rosto reconhecido com sucesso' : 'Rosto não encontrado no cadastro');
+
+  // Adiciona ao log e exibe a notificação toast na tela
   addLogEntry(type, label, fullDetail);
+
   showToast(
     `${granted ? '✅' : '❌'} ${label}${detail ? ' — ' + detail : ''}`,
     granted ? 'success' : 'error'
   );
-  if (granted) {
-    document.getElementById('statFaces').textContent =
-      parseInt(document.getElementById('statFaces').textContent || '0') + 1;
-  }
 }
 
 /* ===================== LOG MANAGEMENT ===================== */
@@ -288,7 +293,7 @@ function addLogEntry(type, label, detail = '') {
   if (state.logEntries.length > 500) state.logEntries.pop();
 
   // Persist
-  try { localStorage.setItem('faceLogs', JSON.stringify(state.logEntries)); } catch(e) {}
+  try { localStorage.setItem('faceLogs', JSON.stringify(state.logEntries)); } catch (e) { }
 
   recalcCounters();
   renderLog();
@@ -297,8 +302,11 @@ function addLogEntry(type, label, detail = '') {
 
 function recalcCounters() {
   state.totalGranted = state.logEntries.filter(e => e.type === 'granted').length;
-  state.totalDenied  = state.logEntries.filter(e => e.type === 'denied').length;
-  document.getElementById('statTotal').textContent = state.logEntries.length;
+  state.totalDenied = state.logEntries.filter(e => e.type === 'denied').length;
+  const statTotalEl = document.getElementById('statTotal');
+  if (statTotalEl) {
+    statTotalEl.textContent = state.logEntries.length;
+  }
 }
 
 function renderLog() {
@@ -328,7 +336,7 @@ function renderLog() {
 function createLogElement(entry) {
   const div = document.createElement('div');
   const isGranted = entry.type === 'granted';
-  const isInfo    = entry.type === 'info';
+  const isInfo = entry.type === 'info';
 
   div.className = `log-entry ${isGranted ? 'granted-entry' : isInfo ? '' : 'denied-entry'}`;
   div.dataset.type = entry.type;
@@ -367,7 +375,7 @@ function clearLog() {
   if (state.logEntries.length === 0) { showToast('Registro já está vazio.', 'info'); return; }
   if (!confirm('Apagar todo o registro de acessos?')) return;
   state.logEntries = [];
-  try { localStorage.removeItem('faceLogs'); } catch(e) {}
+  try { localStorage.removeItem('faceLogs'); } catch (e) { }
   recalcCounters();
   renderLog();
   updateCards();
@@ -386,7 +394,7 @@ function exportLog() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `faceguard_log_${new Date().toISOString().slice(0,10)}.csv`;
+  a.download = `faceguard_log_${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   URL.revokeObjectURL(url);
   showToast('Registro exportado como CSV!', 'success');
@@ -399,9 +407,9 @@ function updateCards() {
   const total = g + d || 1;
 
   document.getElementById('cardGranted').textContent = g;
-  document.getElementById('cardDenied').textContent  = d;
+  document.getElementById('cardDenied').textContent = d;
   document.getElementById('progressGranted').style.width = `${(g / total) * 100}%`;
-  document.getElementById('progressDenied').style.width  = `${(d / total) * 100}%`;
+  document.getElementById('progressDenied').style.width = `${(d / total) * 100}%`;
 }
 
 /* ===================== TOAST ===================== */
@@ -412,9 +420,9 @@ function showToast(message, type = 'info') {
 
   const icons = {
     success: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>`,
-    error:   `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>`,
+    error: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>`,
     warning: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`,
-    info:    `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`,
+    info: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`,
   };
 
   toast.innerHTML = `
