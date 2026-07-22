@@ -43,18 +43,14 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
             Endereço IP do ESP32
           </label>
-          <div class="input-group">
+          <div class="input-group" style="opacity: 0.7; cursor: not-allowed;">
             <span class="input-prefix">http://</span>
-            <input type="text" id="espIpInput" placeholder="192.168.1.xxx" value="" autocomplete="off" spellcheck="false" />
+            <input type="text" id="espIpInput" placeholder="192.168.1.xxx" value="" readonly autocomplete="off" spellcheck="false" style="cursor: not-allowed;" />
           </div>
         </div>
-        <button class="btn-connect" id="btnConnect" onclick="connectToESP()">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg>
-          Conectar
-        </button>
-        <button class="btn-disconnect" id="btnDisconnect" onclick="disconnectFromESP()" style="display:none;">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          Desconectar
+        <button class="btn-sim" id="btnSim" onclick="toggleSimulationMode()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Modo Simulação
         </button>
       </div>
     </section>
@@ -81,16 +77,20 @@
             <div class="placeholder-icon">
               <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
             </div>
-            <p class="placeholder-text">Configure o IP do ESP32 e clique em <strong>Conectar</strong></p>
-            <p class="placeholder-sub">para iniciar o stream de vídeo ao vivo</p>
+            <p class="placeholder-text">Configure o IP do ESP32 ou clique em <strong>Modo Simulação</strong></p>
+            <p class="placeholder-sub">para testar a interface offline sem o hardware físico</p>
           </div>
           <img id="cameraStream" src="" alt="Stream da câmera ESP32" style="display:none;" />
+          <video id="webcamVideo" autoplay playsinline style="display:none; width:100%; height:100%; object-fit:cover;"></video>
+          <canvas id="simCanvas" style="display:none; width:100%; height:100%; object-fit:cover;"></canvas>
+          
           <div class="camera-overlay" id="cameraOverlay" style="display:none;">
             <div class="scan-line"></div>
             <div class="corner tl"></div>
             <div class="corner tr"></div>
             <div class="corner bl"></div>
             <div class="corner br"></div>
+            <div class="sim-overlay-badge" id="simOverlayBadge" style="display:none;">SIMULADOR DE RECONHECIMENTO</div>
           </div>
         </div>
 
@@ -104,10 +104,36 @@
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
             Testar Acesso
           </button>
-          <button class="ctrl-btn enroll-btn" id="btnEnroll" onclick="startEnroll()" title="Cadastrar rosto">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+          <button class="ctrl-btn enroll-btn" style="grid-column: span 2;" id="btnOpenEnrollModal" onclick="openEnrollModal()" title="Cadastrar rosto">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 4 4H5a4 4 0 0 4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
             Cadastrar
           </button>
+        </div>
+
+        <!-- SIMULATION ACTION PANEL (visível no modo simulação) -->
+        <div class="sim-panel" id="simPanel" style="display: none;">
+          <div class="sim-panel-header">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+            Painel de Testes & Eventos Simulados
+          </div>
+          <div class="sim-buttons">
+            <button class="sim-action-btn grant" onclick="simTriggerEvent(true, 'João Silva (ID 1)')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              Liberar: João
+            </button>
+            <button class="sim-action-btn grant" onclick="simTriggerEvent(true, 'Maria Souza (ID 2)')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              Liberar: Maria
+            </button>
+            <button class="sim-action-btn deny" onclick="simTriggerEvent(false, 'Rosto não cadastrado')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              Negar Acesso
+            </button>
+            <button class="sim-action-btn" onclick="simToggleVideoSource()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+              Fonte: <span id="simSourceLabel">WebCam / Scanner</span>
+            </button>
+          </div>
         </div>
 
         <!-- Stats Bar -->
@@ -203,6 +229,26 @@
       </div>
     </div>
   </main>
+
+  <!-- ENROLL MODAL -->
+  <div class="modal-backdrop" id="enrollModalBackdrop" style="display:none;">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>Cadastrar Novo Rosto</h3>
+        <button class="modal-close" onclick="closeEnrollModal()">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <label for="enrollNameInput">Nome da Pessoa</label>
+        <input type="text" id="enrollNameInput" placeholder="Ex: João da Silva" />
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeEnrollModal()">Cancelar</button>
+        <button class="btn-primary" onclick="confirmEnroll()">Iniciar Cadastro</button>
+      </div>
+    </div>
+  </div>
 
   <!-- TOAST NOTIFICATION -->
   <div class="toast-container" id="toastContainer"></div>

@@ -15,6 +15,11 @@ const state = {
   esp32Ip: localStorage.getItem('esp32ip') || (window.location.protocol.startsWith('http') ? window.location.host : ''),
   connected: false,
   isContinuous: false,
+  isSimulation: false,
+  simVideoSource: 'canvas', // 'canvas' | 'webcam'
+  simWebcamStream: null,
+  simCanvasAnimId: null,
+  simTelemetryInterval: null,
   logEntries: JSON.parse(localStorage.getItem('faceLogs') || '[]'),
   currentFilter: 'all',
   totalGranted: 0,
@@ -28,10 +33,7 @@ window.addEventListener('DOMContentLoaded', () => {
   const savedIp = state.esp32Ip;
   if (savedIp) {
     document.getElementById('espIpInput').value = savedIp;
-    // Auto-conecta se o dashboard estiver sendo servido pelo próprio ESP32 (ou servidor local)
-    if (window.location.protocol.startsWith('http') && window.location.host === savedIp) {
-      setTimeout(connectToESP, 100);
-    }
+    setTimeout(connectToESP, 100);
   }
 
   // Restore logs from localStorage
@@ -129,23 +131,17 @@ function setConnectedUI(connected) {
   const dot = document.getElementById('statusDot');
   const label = document.getElementById('statusLabel');
   const liveBadge = document.getElementById('liveBadge');
-  const btnConnect = document.getElementById('btnConnect');
-  const btnDisconnect = document.getElementById('btnDisconnect');
 
   if (connected) {
     dot.className = 'status-dot connected';
     label.textContent = `Conectado — ${state.esp32Ip}`;
     liveBadge.className = 'live-badge live';
     liveBadge.innerHTML = '<span class="live-dot"></span> AO VIVO';
-    btnConnect.style.display = 'none';
-    btnDisconnect.style.display = 'flex';
   } else {
     dot.className = 'status-dot';
     label.textContent = 'Desconectado';
     liveBadge.className = 'live-badge';
     liveBadge.innerHTML = '<span class="live-dot"></span> OFFLINE';
-    btnConnect.style.display = 'flex';
-    btnDisconnect.style.display = 'none';
     document.getElementById('statSharp').textContent = '--';
     document.getElementById('statPeak').textContent = '--';
     document.getElementById('statLDR').textContent = '--';
@@ -204,14 +200,288 @@ function applyStatusToUI(data) {
   }
 }
 
+/* ===================== SIMULATION MODE ===================== */
+function toggleSimulationMode() {
+  if (state.isSimulation) {
+    stopSimulation();
+    showToast('Modo Simulação desativado', 'info');
+  } else {
+    if (state.connected) disconnectFromESP();
+    startSimulation();
+    showToast('Modo Simulação Ativado! Testando sem ESP32.', 'success');
+  }
+}
+
+function startSimulation() {
+  state.isSimulation = true;
+  state.connected = true;
+
+  const btnSim = document.getElementById('btnSim');
+  if (btnSim) btnSim.classList.add('active');
+
+  const dot = document.getElementById('statusDot');
+  const label = document.getElementById('statusLabel');
+  const liveBadge = document.getElementById('liveBadge');
+  const btnConnect = document.getElementById('btnConnect');
+  const btnDisconnect = document.getElementById('btnDisconnect');
+  const simPanel = document.getElementById('simPanel');
+  const placeholder = document.getElementById('cameraPlaceholder');
+  const overlay = document.getElementById('cameraOverlay');
+  const simBadge = document.getElementById('simOverlayBadge');
+
+  dot.className = 'status-dot connected';
+  label.textContent = 'Conectado (Simulação Offline)';
+  liveBadge.className = 'live-badge live';
+  liveBadge.innerHTML = '<span class="live-dot"></span> SIMULAÇÃO';
+  btnConnect.style.display = 'none';
+  btnDisconnect.style.display = 'flex';
+  if (simPanel) simPanel.style.display = 'block';
+  if (simBadge) simBadge.style.display = 'block';
+
+  placeholder.style.display = 'none';
+  overlay.style.display = 'block';
+
+  startSimVideoSource();
+  startSimTelemetry();
+
+  addLogEntry('info', 'Modo Simulação Ativado', 'Ambiente de testes offline pronto');
+}
+
+function stopSimulation() {
+  state.isSimulation = false;
+  state.connected = false;
+
+  const btnSim = document.getElementById('btnSim');
+  if (btnSim) btnSim.classList.remove('active');
+
+  const simPanel = document.getElementById('simPanel');
+  const simBadge = document.getElementById('simOverlayBadge');
+  if (simPanel) simPanel.style.display = 'none';
+  if (simBadge) simBadge.style.display = 'none';
+
+  stopSimVideoSource();
+  stopSimTelemetry();
+  setConnectedUI(false);
+}
+
+function startSimTelemetry() {
+  stopSimTelemetry();
+  state.simTelemetryInterval = setInterval(() => {
+    if (!state.isSimulation) return;
+    const sharp = Math.floor(1200 + Math.random() * 400);
+    const peak = Math.floor(1700 + Math.random() * 300);
+    const ldr = Math.floor(600 + Math.random() * 250);
+
+    document.getElementById('statSharp').textContent = sharp;
+    document.getElementById('statPeak').textContent = peak;
+    document.getElementById('statLDR').textContent = ldr;
+  }, 1200);
+}
+
+function stopSimTelemetry() {
+  if (state.simTelemetryInterval) {
+    clearInterval(state.simTelemetryInterval);
+    state.simTelemetryInterval = null;
+  }
+}
+
+function startSimVideoSource() {
+  stopSimVideoSource();
+  const video = document.getElementById('webcamVideo');
+  const canvas = document.getElementById('simCanvas');
+
+  if (state.simVideoSource === 'webcam' && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+    navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
+      .then(stream => {
+        state.simWebcamStream = stream;
+        video.srcObject = stream;
+        video.style.display = 'block';
+        canvas.style.display = 'none';
+        const lbl = document.getElementById('simSourceLabel');
+        if (lbl) lbl.textContent = 'WebCam PC';
+      })
+      .catch(err => {
+        console.warn('Webcam não disponível, usando scanner canvas:', err);
+        state.simVideoSource = 'canvas';
+        initSimCanvas();
+      });
+  } else {
+    initSimCanvas();
+  }
+}
+
+function stopSimVideoSource() {
+  const video = document.getElementById('webcamVideo');
+  const canvas = document.getElementById('simCanvas');
+
+  if (state.simWebcamStream) {
+    state.simWebcamStream.getTracks().forEach(track => track.stop());
+    state.simWebcamStream = null;
+  }
+  if (video) video.style.display = 'none';
+  if (canvas) canvas.style.display = 'none';
+
+  if (state.simCanvasAnimId) {
+    cancelAnimationFrame(state.simCanvasAnimId);
+    state.simCanvasAnimId = null;
+  }
+}
+
+function simToggleVideoSource() {
+  if (!state.isSimulation) return;
+  state.simVideoSource = (state.simVideoSource === 'canvas') ? 'webcam' : 'canvas';
+  startSimVideoSource();
+  showToast(`Fonte de vídeo: ${state.simVideoSource === 'webcam' ? 'WebCam PC' : 'Scanner Simulado'}`, 'info');
+}
+
+function initSimCanvas() {
+  const canvas = document.getElementById('simCanvas');
+  const video = document.getElementById('webcamVideo');
+  if (!canvas || !video) return;
+
+  video.style.display = 'none';
+  canvas.style.display = 'block';
+  const lbl = document.getElementById('simSourceLabel');
+  if (lbl) lbl.textContent = 'Scanner Canvas';
+
+  const ctx = canvas.getContext('2d');
+  let angle = 0;
+
+  function render() {
+    if (!state.isSimulation || state.simVideoSource !== 'canvas') return;
+
+    if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
+      canvas.width = canvas.clientWidth || 640;
+      canvas.height = canvas.clientHeight || 480;
+    }
+
+    const w = canvas.width;
+    const h = canvas.height;
+
+    ctx.fillStyle = '#0b0f19';
+    ctx.fillRect(0, 0, w, h);
+
+    // Tech Grid
+    ctx.strokeStyle = 'rgba(59, 130, 246, 0.08)';
+    ctx.lineWidth = 1;
+    const gridSize = 40;
+    for (let x = 0; x < w; x += gridSize) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+    }
+    for (let y = 0; y < h; y += gridSize) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+    }
+
+    // Dynamic Face Target Center
+    const cx = w / 2 + Math.sin(angle) * 15;
+    const cy = h / 2 + Math.cos(angle * 0.7) * 10;
+    const boxW = 180;
+    const boxH = 220;
+
+    // Face mesh oval
+    ctx.strokeStyle = 'rgba(96, 165, 250, 0.4)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, boxW / 2.2, boxH / 2.2, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Bounding Box
+    ctx.strokeStyle = 'rgba(34, 197, 94, 0.8)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(cx - boxW / 2, cy - boxH / 2, boxW, boxH);
+
+    // Corner brackets
+    const cLen = 20;
+    ctx.strokeStyle = '#22c55e';
+    ctx.lineWidth = 3;
+
+    ctx.beginPath();
+    ctx.moveTo(cx - boxW / 2, cy - boxH / 2 + cLen);
+    ctx.lineTo(cx - boxW / 2, cy - boxH / 2);
+    ctx.lineTo(cx - boxW / 2 + cLen, cy - boxH / 2);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(cx + boxW / 2 - cLen, cy - boxH / 2);
+    ctx.lineTo(cx + boxW / 2, cy - boxH / 2);
+    ctx.lineTo(cx + boxW / 2, cy - boxH / 2 + cLen);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(cx - boxW / 2, cy + boxH / 2 - cLen);
+    ctx.lineTo(cx - boxW / 2, cy + boxH / 2);
+    ctx.lineTo(cx - boxW / 2 + cLen, cy + boxH / 2);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(cx + boxW / 2 - cLen, cy + boxH / 2);
+    ctx.lineTo(cx + boxW / 2, cy + boxH / 2);
+    ctx.lineTo(cx + boxW / 2, cy + boxH / 2 - cLen);
+    ctx.stroke();
+
+    // Facial landmark points
+    ctx.fillStyle = '#60a5fa';
+    const pts = [
+      { x: cx - 35, y: cy - 25 },
+      { x: cx + 35, y: cy - 25 },
+      { x: cx, y: cy + 5 },
+      { x: cx - 25, y: cy + 45 },
+      { x: cx + 25, y: cy + 45 },
+      { x: cx, y: cy + 50 }
+    ];
+    pts.forEach(p => {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    ctx.fillStyle = '#22c55e';
+    ctx.font = '12px "JetBrains Mono", monospace';
+    ctx.fillText('ROSTO_DETECTADO [99.2%]', cx - boxW / 2, cy - boxH / 2 - 8);
+
+    angle += 0.03;
+    state.simCanvasAnimId = requestAnimationFrame(render);
+  }
+
+  render();
+}
+
+function simTriggerEvent(granted, name) {
+  if (!state.isSimulation && !state.connected) {
+    showToast('Ative a Simulação ou Conecte ao ESP32 primeiro!', 'warning');
+    return;
+  }
+  if (granted) {
+    registerAccessEvent(true, `Rosto: ${name}`);
+  } else {
+    registerAccessEvent(false, `Motivo: ${name}`);
+  }
+}
+
 /* ===================== CAMERA CONTROLS ===================== */
-async function sendControl(cmd) {
+async function sendControl(cmd, extraParams = '') {
   if (!state.connected) {
     showToast('Conecte ao ESP32 primeiro!', 'warning');
     return false;
   }
+  if (state.isSimulation) {
+    if (cmd === 't') {
+      setTimeout(() => {
+        const randGranted = Math.random() > 0.3;
+        simTriggerEvent(randGranted, randGranted ? 'Usuário Simulado' : 'Rosto Não Reconhecido');
+      }, 800);
+    } else if (cmd === 'm' || cmd === 'c') {
+      const simulatedName = extraParams ? decodeURIComponent(extraParams.replace('&name=', '')) : 'Novo Rosto Simulado';
+      setTimeout(() => {
+        simTriggerEvent(true, `${simulatedName} Cadastrado (Simulação)`);
+      }, 1500);
+    }
+    return true;
+  }
   try {
-    const url = `http://${state.esp32Ip}/control?cmd=${cmd}`;
+    const url = `http://${state.esp32Ip}/control?cmd=${cmd}${extraParams}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
     return res.ok;
   } catch (e) {
@@ -240,11 +510,37 @@ async function testAccess() {
   }
 }
 
-async function startEnroll() {
-  const ok = await sendControl('c');
+function openEnrollModal() {
+  const modal = document.getElementById('enrollModalBackdrop');
+  const input = document.getElementById('enrollNameInput');
+  if (modal) {
+    modal.style.display = 'flex';
+    if (input) {
+      input.value = '';
+      input.focus();
+    }
+  }
+}
+
+function closeEnrollModal() {
+  const modal = document.getElementById('enrollModalBackdrop');
+  if (modal) {
+    modal.style.display = 'none';
+  }
+}
+
+async function confirmEnroll() {
+  const nameInput = document.getElementById('enrollNameInput');
+  const nameVal = nameInput ? nameInput.value.trim() : '';
+  const extraParams = nameVal ? `&name=${encodeURIComponent(nameVal)}` : '';
+  
+  closeEnrollModal();
+  
+  const ok = await sendControl('m', extraParams);
   if (ok) {
-    showToast('📸 Cadastramento iniciado! Olhe para a câmera.', 'warning');
-    addLogEntry('info', 'Cadastramento iniciado', 'Aguardando rosto');
+    const nameStr = nameVal ? ` (${nameVal})` : '';
+    showToast(`📸 Cadastramento múltiplo iniciado! Olhe para a câmera.${nameStr}`, 'warning');
+    addLogEntry('info', 'Cadastramento iniciado', `Aguardando rosto...${nameStr}`);
   }
 }
 
@@ -476,3 +772,6 @@ function escapeHtml(str) {
 /* ===================== EXPOSE FOR CONSOLE TESTING ===================== */
 window.registerAccessEvent = registerAccessEvent;
 window.addLogEntry = addLogEntry;
+window.toggleSimulationMode = toggleSimulationMode;
+window.simTriggerEvent = simTriggerEvent;
+window.simToggleVideoSource = simToggleVideoSource;
