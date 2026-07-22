@@ -54,7 +54,12 @@ O case foi modelado sob medida para acomodar o ESP32-CAM e os demais componentes
 
 <!-- 📸 Print/foto do modelo 3D -->
 <p align="center">
-  <img src="modelo 3d/esboço 3d c componentes.png" alt="Modelo 3D do case FaceGuard" width="500"/>
+  <img src="modelo 3d/Modelo 3D Final.png" alt="Modelo 3D do case FaceGuard Visão 1" width="500"/>
+</p>
+
+<!-- 📸 Print/foto do modelo 3D -->
+<p align="center">
+  <img src="modelo 3d/Modelo 3D Final - 2.png" alt="Modelo 3D do case FaceGuard Visão 2" width="500"/>
 </p>
 
 ---
