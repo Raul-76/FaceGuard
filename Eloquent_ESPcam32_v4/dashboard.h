@@ -969,132 +969,7 @@ body::after {
   .config-field { max-width: 100%; }
 }
 
-/* ===================== SIMULATION MODE STYLES ===================== */
-.btn-sim {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 0 16px;
-  height: 38px;
-  border: 1px solid rgba(139, 92, 246, 0.4);
-  border-radius: var(--radius-sm);
-  font-family: var(--font-sans);
-  font-size: 0.83rem;
-  font-weight: 600;
-  cursor: pointer;
-  background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(59, 130, 246, 0.2));
-  color: #c084fc;
-  box-shadow: 0 0 15px rgba(139, 92, 246, 0.15);
-  transition: var(--transition);
-  white-space: nowrap;
-}
 
-.btn-sim:hover {
-  background: linear-gradient(135deg, rgba(139, 92, 246, 0.35), rgba(59, 130, 246, 0.35));
-  color: #e9d5ff;
-  border-color: rgba(168, 85, 247, 0.6);
-  transform: translateY(-1px);
-  box-shadow: 0 0 20px rgba(168, 85, 247, 0.3);
-}
-
-.btn-sim.active {
-  background: linear-gradient(135deg, #9333ea, #6366f1);
-  color: #fff;
-  border-color: #a855f7;
-  box-shadow: 0 0 20px rgba(168, 85, 247, 0.5);
-}
-
-.sim-overlay-badge {
-  position: absolute;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(147, 51, 234, 0.85);
-  backdrop-filter: blur(8px);
-  border: 1px solid rgba(216, 180, 254, 0.4);
-  color: #f3e8ff;
-  font-family: var(--font-mono);
-  font-size: 0.65rem;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  padding: 3px 10px;
-  border-radius: 100px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
-  pointer-events: none;
-  z-index: 10;
-}
-
-.sim-panel {
-  background: rgba(17, 24, 39, 0.95);
-  border-top: 1px solid rgba(147, 51, 234, 0.3);
-  border-bottom: 1px solid var(--border);
-  padding: 12px 16px;
-  animation: fadeIn 0.3s ease;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(-5px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.sim-panel-header {
-  font-size: 0.72rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #c084fc;
-  margin-bottom: 10px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.sim-buttons {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  gap: 8px;
-}
-
-.sim-action-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 8px 12px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  font-family: var(--font-sans);
-  font-size: 0.75rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: var(--transition);
-}
-
-.sim-action-btn:hover {
-  background: var(--bg-hover);
-  border-color: rgba(255, 255, 255, 0.2);
-  transform: translateY(-1px);
-}
-
-.sim-action-btn.grant {
-  border-color: rgba(34, 197, 94, 0.3);
-  color: var(--green);
-}
-.sim-action-btn.grant:hover {
-  background: var(--green-dim);
-  border-color: var(--green);
-}
-
-.sim-action-btn.deny {
-  border-color: rgba(239, 68, 68, 0.3);
-  color: var(--red);
-}
-.sim-action-btn.deny:hover {
-  background: var(--red-dim);
-  border-color: var(--red);
-}
 
 /* ===================== MODAL ===================== */
 .modal-backdrop {
@@ -1249,10 +1124,7 @@ body::after {
             <input type="text" id="espIpInput" placeholder="192.168.1.xxx" value="" readonly autocomplete="off" spellcheck="false" style="cursor: not-allowed;" />
           </div>
         </div>
-        <button class="btn-sim" id="btnSim" onclick="toggleSimulationMode()">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-          Modo Simulação
-        </button>
+
       </div>
     </section>
 
@@ -1278,12 +1150,10 @@ body::after {
             <div class="placeholder-icon">
               <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
             </div>
-            <p class="placeholder-text">Configure o IP do ESP32 ou clique em <strong>Modo Simulação</strong></p>
-            <p class="placeholder-sub">para testar a interface offline sem o hardware físico</p>
+            <p class="placeholder-text">Configure o IP do ESP32 para testar a interface</p>
           </div>
           <img id="cameraStream" src="" alt="Stream da câmera ESP32" style="display:none;" />
-          <video id="webcamVideo" autoplay playsinline style="display:none; width:100%; height:100%; object-fit:cover;"></video>
-          <canvas id="simCanvas" style="display:none; width:100%; height:100%; object-fit:cover;"></canvas>
+
           
           <div class="camera-overlay" id="cameraOverlay" style="display:none;">
             <div class="scan-line"></div>
@@ -1291,7 +1161,7 @@ body::after {
             <div class="corner tr"></div>
             <div class="corner bl"></div>
             <div class="corner br"></div>
-            <div class="sim-overlay-badge" id="simOverlayBadge" style="display:none;">SIMULADOR DE RECONHECIMENTO</div>
+
           </div>
         </div>
 
@@ -1311,31 +1181,7 @@ body::after {
           </button>
         </div>
 
-        <!-- SIMULATION ACTION PANEL (visível no modo simulação) -->
-        <div class="sim-panel" id="simPanel" style="display: none;">
-          <div class="sim-panel-header">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-            Painel de Testes & Eventos Simulados
-          </div>
-          <div class="sim-buttons">
-            <button class="sim-action-btn grant" onclick="simTriggerEvent(true, 'João Silva (ID 1)')">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-              Liberar: João
-            </button>
-            <button class="sim-action-btn grant" onclick="simTriggerEvent(true, 'Maria Souza (ID 2)')">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-              Liberar: Maria
-            </button>
-            <button class="sim-action-btn deny" onclick="simTriggerEvent(false, 'Rosto não cadastrado')">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-              Negar Acesso
-            </button>
-            <button class="sim-action-btn" onclick="simToggleVideoSource()">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
-              Fonte: <span id="simSourceLabel">WebCam / Scanner</span>
-            </button>
-          </div>
-        </div>
+
 
         <!-- Stats Bar -->
         <div class="stats-bar" id="statsBar">
@@ -1474,11 +1320,6 @@ const state = {
   esp32Ip: localStorage.getItem('esp32ip') || (window.location.protocol.startsWith('http') ? window.location.host : ''),
   connected: false,
   isContinuous: false,
-  isSimulation: false,
-  simVideoSource: 'canvas', // 'canvas' | 'webcam'
-  simWebcamStream: null,
-  simCanvasAnimId: null,
-  simTelemetryInterval: null,
   logEntries: JSON.parse(localStorage.getItem('faceLogs') || '[]'),
   currentFilter: 'all',
   totalGranted: 0,
@@ -1659,265 +1500,7 @@ function applyStatusToUI(data) {
   }
 }
 
-/* ===================== SIMULATION MODE ===================== */
-function toggleSimulationMode() {
-  if (state.isSimulation) {
-    stopSimulation();
-    showToast('Modo Simulação desativado', 'info');
-  } else {
-    if (state.connected) disconnectFromESP();
-    startSimulation();
-    showToast('Modo Simulação Ativado! Testando sem ESP32.', 'success');
-  }
-}
 
-function startSimulation() {
-  state.isSimulation = true;
-  state.connected = true;
-
-  const btnSim = document.getElementById('btnSim');
-  if (btnSim) btnSim.classList.add('active');
-
-  const dot = document.getElementById('statusDot');
-  const label = document.getElementById('statusLabel');
-  const liveBadge = document.getElementById('liveBadge');
-  const btnConnect = document.getElementById('btnConnect');
-  const btnDisconnect = document.getElementById('btnDisconnect');
-  const simPanel = document.getElementById('simPanel');
-  const placeholder = document.getElementById('cameraPlaceholder');
-  const overlay = document.getElementById('cameraOverlay');
-  const simBadge = document.getElementById('simOverlayBadge');
-
-  dot.className = 'status-dot connected';
-  label.textContent = 'Conectado (Simulação Offline)';
-  liveBadge.className = 'live-badge live';
-  liveBadge.innerHTML = '<span class="live-dot"></span> SIMULAÇÃO';
-  btnConnect.style.display = 'none';
-  btnDisconnect.style.display = 'flex';
-  if (simPanel) simPanel.style.display = 'block';
-  if (simBadge) simBadge.style.display = 'block';
-
-  placeholder.style.display = 'none';
-  overlay.style.display = 'block';
-
-  startSimVideoSource();
-  startSimTelemetry();
-
-  addLogEntry('info', 'Modo Simulação Ativado', 'Ambiente de testes offline pronto');
-}
-
-function stopSimulation() {
-  state.isSimulation = false;
-  state.connected = false;
-
-  const btnSim = document.getElementById('btnSim');
-  if (btnSim) btnSim.classList.remove('active');
-
-  const simPanel = document.getElementById('simPanel');
-  const simBadge = document.getElementById('simOverlayBadge');
-  if (simPanel) simPanel.style.display = 'none';
-  if (simBadge) simBadge.style.display = 'none';
-
-  stopSimVideoSource();
-  stopSimTelemetry();
-  setConnectedUI(false);
-}
-
-function startSimTelemetry() {
-  stopSimTelemetry();
-  state.simTelemetryInterval = setInterval(() => {
-    if (!state.isSimulation) return;
-    const sharp = Math.floor(1200 + Math.random() * 400);
-    const peak = Math.floor(1700 + Math.random() * 300);
-    const ldr = Math.floor(600 + Math.random() * 250);
-
-    document.getElementById('statSharp').textContent = sharp;
-    document.getElementById('statPeak').textContent = peak;
-    document.getElementById('statLDR').textContent = ldr;
-  }, 1200);
-}
-
-function stopSimTelemetry() {
-  if (state.simTelemetryInterval) {
-    clearInterval(state.simTelemetryInterval);
-    state.simTelemetryInterval = null;
-  }
-}
-
-function startSimVideoSource() {
-  stopSimVideoSource();
-  const video = document.getElementById('webcamVideo');
-  const canvas = document.getElementById('simCanvas');
-
-  if (state.simVideoSource === 'webcam' && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-    navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
-      .then(stream => {
-        state.simWebcamStream = stream;
-        video.srcObject = stream;
-        video.style.display = 'block';
-        canvas.style.display = 'none';
-        const lbl = document.getElementById('simSourceLabel');
-        if (lbl) lbl.textContent = 'WebCam PC';
-      })
-      .catch(err => {
-        console.warn('Webcam não disponível, usando scanner canvas:', err);
-        state.simVideoSource = 'canvas';
-        initSimCanvas();
-      });
-  } else {
-    initSimCanvas();
-  }
-}
-
-function stopSimVideoSource() {
-  const video = document.getElementById('webcamVideo');
-  const canvas = document.getElementById('simCanvas');
-
-  if (state.simWebcamStream) {
-    state.simWebcamStream.getTracks().forEach(track => track.stop());
-    state.simWebcamStream = null;
-  }
-  if (video) video.style.display = 'none';
-  if (canvas) canvas.style.display = 'none';
-
-  if (state.simCanvasAnimId) {
-    cancelAnimationFrame(state.simCanvasAnimId);
-    state.simCanvasAnimId = null;
-  }
-}
-
-function simToggleVideoSource() {
-  if (!state.isSimulation) return;
-  state.simVideoSource = (state.simVideoSource === 'canvas') ? 'webcam' : 'canvas';
-  startSimVideoSource();
-  showToast(`Fonte de vídeo: ${state.simVideoSource === 'webcam' ? 'WebCam PC' : 'Scanner Simulado'}`, 'info');
-}
-
-function initSimCanvas() {
-  const canvas = document.getElementById('simCanvas');
-  const video = document.getElementById('webcamVideo');
-  if (!canvas || !video) return;
-
-  video.style.display = 'none';
-  canvas.style.display = 'block';
-  const lbl = document.getElementById('simSourceLabel');
-  if (lbl) lbl.textContent = 'Scanner Canvas';
-
-  const ctx = canvas.getContext('2d');
-  let angle = 0;
-
-  function render() {
-    if (!state.isSimulation || state.simVideoSource !== 'canvas') return;
-
-    if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
-      canvas.width = canvas.clientWidth || 640;
-      canvas.height = canvas.clientHeight || 480;
-    }
-
-    const w = canvas.width;
-    const h = canvas.height;
-
-    ctx.fillStyle = '#0b0f19';
-    ctx.fillRect(0, 0, w, h);
-
-    // Tech Grid
-    ctx.strokeStyle = 'rgba(59, 130, 246, 0.08)';
-    ctx.lineWidth = 1;
-    const gridSize = 40;
-    for (let x = 0; x < w; x += gridSize) {
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
-    }
-    for (let y = 0; y < h; y += gridSize) {
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
-    }
-
-    // Dynamic Face Target Center
-    const cx = w / 2 + Math.sin(angle) * 15;
-    const cy = h / 2 + Math.cos(angle * 0.7) * 10;
-    const boxW = 180;
-    const boxH = 220;
-
-    // Face mesh oval
-    ctx.strokeStyle = 'rgba(96, 165, 250, 0.4)';
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath();
-    ctx.ellipse(cx, cy, boxW / 2.2, boxH / 2.2, 0, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // Bounding Box
-    ctx.strokeStyle = 'rgba(34, 197, 94, 0.8)';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(cx - boxW / 2, cy - boxH / 2, boxW, boxH);
-
-    // Corner brackets
-    const cLen = 20;
-    ctx.strokeStyle = '#22c55e';
-    ctx.lineWidth = 3;
-
-    ctx.beginPath();
-    ctx.moveTo(cx - boxW / 2, cy - boxH / 2 + cLen);
-    ctx.lineTo(cx - boxW / 2, cy - boxH / 2);
-    ctx.lineTo(cx - boxW / 2 + cLen, cy - boxH / 2);
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.moveTo(cx + boxW / 2 - cLen, cy - boxH / 2);
-    ctx.lineTo(cx + boxW / 2, cy - boxH / 2);
-    ctx.lineTo(cx + boxW / 2, cy - boxH / 2 + cLen);
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.moveTo(cx - boxW / 2, cy + boxH / 2 - cLen);
-    ctx.lineTo(cx - boxW / 2, cy + boxH / 2);
-    ctx.lineTo(cx - boxW / 2 + cLen, cy + boxH / 2);
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.moveTo(cx + boxW / 2 - cLen, cy + boxH / 2);
-    ctx.lineTo(cx + boxW / 2, cy + boxH / 2);
-    ctx.lineTo(cx + boxW / 2, cy + boxH / 2 - cLen);
-    ctx.stroke();
-
-    // Facial landmark points
-    ctx.fillStyle = '#60a5fa';
-    const pts = [
-      { x: cx - 35, y: cy - 25 },
-      { x: cx + 35, y: cy - 25 },
-      { x: cx, y: cy + 5 },
-      { x: cx - 25, y: cy + 45 },
-      { x: cx + 25, y: cy + 45 },
-      { x: cx, y: cy + 50 }
-    ];
-    pts.forEach(p => {
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
-      ctx.fill();
-    });
-
-    ctx.fillStyle = '#22c55e';
-    ctx.font = '12px "JetBrains Mono", monospace';
-    ctx.fillText('ROSTO_DETECTADO [99.2%]', cx - boxW / 2, cy - boxH / 2 - 8);
-
-    angle += 0.03;
-    state.simCanvasAnimId = requestAnimationFrame(render);
-  }
-
-  render();
-}
-
-function simTriggerEvent(granted, name) {
-  if (!state.isSimulation && !state.connected) {
-    showToast('Ative a Simulação ou Conecte ao ESP32 primeiro!', 'warning');
-    return;
-  }
-  if (granted) {
-    registerAccessEvent(true, `Rosto: ${name}`);
-  } else {
-    registerAccessEvent(false, `Motivo: ${name}`);
-  }
-}
 
 /* ===================== CAMERA CONTROLS ===================== */
 async function sendControl(cmd, extraParams = '') {
@@ -1925,20 +1508,7 @@ async function sendControl(cmd, extraParams = '') {
     showToast('Conecte ao ESP32 primeiro!', 'warning');
     return false;
   }
-  if (state.isSimulation) {
-    if (cmd === 't') {
-      setTimeout(() => {
-        const randGranted = Math.random() > 0.3;
-        simTriggerEvent(randGranted, randGranted ? 'Usuário Simulado' : 'Rosto Não Reconhecido');
-      }, 800);
-    } else if (cmd === 'm' || cmd === 'c') {
-      const simulatedName = extraParams ? decodeURIComponent(extraParams.replace('&name=', '')) : 'Novo Rosto Simulado';
-      setTimeout(() => {
-        simTriggerEvent(true, `${simulatedName} Cadastrado (Simulação)`);
-      }, 1500);
-    }
-    return true;
-  }
+
   try {
     const url = `http://${state.esp32Ip}/control?cmd=${cmd}${extraParams}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
@@ -2231,9 +1801,6 @@ function escapeHtml(str) {
 /* ===================== EXPOSE FOR CONSOLE TESTING ===================== */
 window.registerAccessEvent = registerAccessEvent;
 window.addLogEntry = addLogEntry;
-window.toggleSimulationMode = toggleSimulationMode;
-window.simTriggerEvent = simTriggerEvent;
-window.simToggleVideoSource = simToggleVideoSource;
 
 </script>
 </body>
