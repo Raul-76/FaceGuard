@@ -133,10 +133,10 @@ const Nota somAcessoNegado[] = {{600, 150}, // ataque imediato
 #define AGC_GANHO_FIXO 0   // 0..30 (ganho baixo = menos ruido)
 
 // ==================== CONFIG ====================
-// #define WIFI_SSID "Caio.2g"
-#define WIFI_SSID "WIFI"
-// #define WIFI_PASS "28460363"
-#define WIFI_PASS "net12345"
+ #define WIFI_SSID "Caio.2g"
+//#define WIFI_SSID "WIFI"
+ #define WIFI_PASS "28460363"
+//#define WIFI_PASS "net12345"
 
 #define JPG_CAP 40000 // teto do buffer compartilhado do stream
 #define FRAME_W 240   // camera.resolution.face()
@@ -623,6 +623,7 @@ void setup() {
   delay(2000); // da tempo do monitor serial conectar
   Serial.begin(115200);
   Serial.println("\n=== DIAGNOSTICO + LIVE FEED (v4) ===");
+  
 
   // Distingue boot por energia de retorno do deep sleep. Util pra
   // confirmar que o ciclo de sono realmente aconteceu.
@@ -652,7 +653,7 @@ void setup() {
   // --- Configuracao da camera (ANTES do begin) ---
   camera.pinout.freenove_s3();
   camera.brownout.disable(); // evita reset por queda de tensao no pico
-  camera.resolution.qvga();  // resolucao qvga 320x240
+  camera.resolution.face();  // resolucao qvga 320x240
   camera.quality.high();     // quality FIXA: e o que torna o tamanho do
                              // JPEG utilizavel como proxy de nitidez
   camera.xclk.slow();        // 10MHz: OV2640 estavel, sem chuvisco
