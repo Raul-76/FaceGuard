@@ -1369,9 +1369,9 @@ function disconnectFromESP() {
 }
 
 function startStream(ip) {
-  // Se o usuário digitou uma porta no IP (ex: localhost:3000), usa ela. 
-  // Senão, usa a rota padrão /stream
-  const streamUrl = `http://${ip}/stream`;
+  // O feed de vídeo do ESP32 roda na porta 81, separada da porta 80 (API)
+  const baseIp = ip.split(':')[0]; // Remove qualquer porta caso o usuário tenha digitado
+  const streamUrl = `http://${baseIp}:81/stream`;
 
   const img = document.getElementById('cameraStream');
   const placeholder = document.getElementById('cameraPlaceholder');
