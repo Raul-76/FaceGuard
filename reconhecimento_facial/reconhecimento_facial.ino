@@ -596,7 +596,19 @@ static esp_err_t streamHandler(httpd_req_t *req) {
 
 static esp_err_t indexHandler(httpd_req_t *req) {
   httpd_resp_set_type(req, "text/html");
-  return httpd_resp_send(req, INDEX_HTML, HTTPD_RESP_USE_STRLEN);
+  const char *ptr = INDEX_HTML;
+  size_t len = strlen(INDEX_HTML);
+  const size_t CHUNK = 8192;
+  
+  while (len > 0) {
+    size_t to_send = (len < CHUNK) ? len : CHUNK;
+    if (httpd_resp_send_chunk(req, ptr, to_send) != ESP_OK) {
+      return ESP_FAIL;
+    }
+    ptr += to_send;
+    len -= to_send;
+  }
+  return httpd_resp_send_chunk(req, NULL, 0);
 }
 
 void startServer() {
