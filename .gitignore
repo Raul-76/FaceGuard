@@ -1,7 +1,0 @@
-# Ignorar a pasta dashboard e todo o seu conteúdo
-dashboard/
-dashboard/*
-**/dashboard/
-**/dashboard/*
-build.py
-
