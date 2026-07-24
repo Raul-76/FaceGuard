@@ -346,11 +346,14 @@ body::after {
   grid-template-columns: 1fr 400px;
   gap: 20px;
   min-height: 0;
+  min-width: 0;
   align-items: stretch;
 }
 
 @media (max-width: 1100px) {
   .grid { grid-template-columns: 1fr; }
+  body { height: auto; min-height: 100vh; overflow-y: auto; }
+  .camera-container { min-height: 400px; }
 }
 
 /* ===================== PANEL ===================== */
@@ -363,6 +366,7 @@ body::after {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
 }
 
 .panel-header {
@@ -602,6 +606,7 @@ body::after {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-muted);
+  text-align: center;
 }
 
 .stat-divider {
@@ -616,6 +621,7 @@ body::after {
   flex-direction: column;
   gap: 16px;
   min-height: 0;
+  min-width: 0;
 }
 
 .log-filters {
@@ -967,6 +973,7 @@ body::after {
   .main { padding: 16px 16px 40px; }
   .cards-row { grid-template-columns: 1fr; }
   .config-field { max-width: 100%; }
+  .camera-container { min-height: 250px; }
 }
 
 
