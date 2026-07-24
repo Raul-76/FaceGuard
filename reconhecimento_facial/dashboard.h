@@ -5,12 +5,12 @@
 
 static const char INDEX_HTML[] PROGMEM = R"HTML(
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FaceGuard — Sistema de Reconhecimento Facial</title>
-  <meta name="description" content="Dashboard de monitoramento em tempo real com câmera ao vivo e registro de acessos do sistema de reconhecimento facial ESP32." />
+  <title>FaceGuard ESP32 Monitor</title>
+  <meta name="description" content="Real-time monitoring dashboard with live camera feed and access logs for the ESP32 facial recognition system." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -1110,7 +1110,7 @@ body::after {
       </div>
       <div class="header-status">
         <div class="status-dot" id="statusDot"></div>
-        <span class="status-label" id="statusLabel">Desconectado</span>
+        <span class="status-label" id="statusLabel">Disconnected</span>
       </div>
     </div>
   </header>
@@ -1124,7 +1124,7 @@ body::after {
         <div class="config-field">
           <label for="espIpInput">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-            Endereço IP do ESP32
+            ESP32 IP Address
           </label>
           <div class="input-group" style="opacity: 0.7; cursor: not-allowed;">
             <span class="input-prefix">http://</span>
@@ -1145,7 +1145,7 @@ body::after {
             <div class="panel-icon camera-icon">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
             </div>
-            Câmera ao Vivo
+            Live Camera
           </div>
           <div class="live-badge" id="liveBadge">
             <span class="live-dot"></span> OFFLINE
@@ -1157,9 +1157,9 @@ body::after {
             <div class="placeholder-icon">
               <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
             </div>
-            <p class="placeholder-text">Configure o IP do ESP32 para testar a interface</p>
+            <p class="placeholder-text">Configure the ESP32 IP to test the interface</p>
           </div>
-          <img id="cameraStream" src="" alt="Stream da câmera ESP32" style="display:none;" />
+          <img id="cameraStream" src="" alt="ESP32 camera stream" style="display:none;" />
 
           
           <div class="camera-overlay" id="cameraOverlay" style="display:none;">
@@ -1174,13 +1174,13 @@ body::after {
 
         <!-- Camera Controls -->
         <div class="controls-grid" id="controlsGrid">
-          <button class="ctrl-btn" id="btnTestAccess" onclick="testAccess()" title="Testar acesso (Tentativa)">
+          <button class="ctrl-btn" id="btnTestAccess" onclick="testAccess()" title="Test access (Attempt)">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-            Testar Acesso
+            Test Access
           </button>
-          <button class="ctrl-btn enroll-btn" id="btnOpenEnrollModal" onclick="openEnrollModal()" title="Cadastrar rosto">
+          <button class="ctrl-btn enroll-btn" id="btnOpenEnrollModal" onclick="openEnrollModal()" title="Enroll face">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 4 4H5a4 4 0 0 4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
-            Cadastrar
+            Enroll
           </button>
         </div>
 
@@ -1190,17 +1190,17 @@ body::after {
         <div class="stats-bar" id="statsBar">
           <div class="stat-item">
             <span class="stat-val" id="statSharp">--</span>
-            <span class="stat-lbl">Nitidez</span>
+            <span class="stat-lbl">Sharpness</span>
           </div>
           <div class="stat-divider"></div>
           <div class="stat-item">
             <span class="stat-val" id="statPeak">--</span>
-            <span class="stat-lbl">Pico Nitidez</span>
+            <span class="stat-lbl">Peak Sharpness</span>
           </div>
           <div class="stat-divider"></div>
           <div class="stat-item">
             <span class="stat-val" id="statLDR">--</span>
-            <span class="stat-lbl">Luz (LDR)</span>
+            <span class="stat-lbl">Light (LDR)</span>
           </div>
         </div>
       </div>
@@ -1215,13 +1215,13 @@ body::after {
               <div class="panel-icon log-icon">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
               </div>
-              Registro de Acessos
+              Access Log
             </div>
             <div class="panel-actions">
-              <button class="icon-btn" onclick="clearLog()" title="Limpar registro">
+              <button class="icon-btn" onclick="clearLog()" title="Clear log">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
               </button>
-              <button class="icon-btn" onclick="exportLog()" title="Exportar registro">
+              <button class="icon-btn" onclick="exportLog()" title="Export log">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
               </button>
             </div>
@@ -1229,12 +1229,12 @@ body::after {
 
           <!-- Log Filters -->
           <div class="log-filters">
-            <button class="filter-btn active" data-filter="all" onclick="filterLog('all', this)">Todos</button>
+            <button class="filter-btn active" data-filter="all" onclick="filterLog('all', this)">All</button>
             <button class="filter-btn" data-filter="granted" onclick="filterLog('granted', this)">
-              <span class="filter-dot granted"></span> Liberado
+              <span class="filter-dot granted"></span> Granted
             </button>
             <button class="filter-btn" data-filter="denied" onclick="filterLog('denied', this)">
-              <span class="filter-dot denied"></span> Negado
+              <span class="filter-dot denied"></span> Denied
             </button>
           </div>
 
@@ -1242,8 +1242,8 @@ body::after {
           <div class="log-list" id="logList">
             <div class="log-empty" id="logEmpty">
               <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-              <p>Nenhum registro ainda</p>
-              <span>Os eventos aparecerão aqui conforme ocorrerem</span>
+              <p>No logs yet</p>
+              <span>Events will appear here as they occur</span>
             </div>
           </div>
         </div>
@@ -1256,7 +1256,7 @@ body::after {
             </div>
             <div class="card-info">
               <span class="card-num" id="cardGranted">0</span>
-              <span class="card-label">Acessos Liberados</span>
+              <span class="card-label">Granted Accesses</span>
             </div>
             <div class="card-progress">
               <div class="progress-bar granted-bar" id="progressGranted" style="width:0%"></div>
@@ -1268,7 +1268,7 @@ body::after {
             </div>
             <div class="card-info">
               <span class="card-num" id="cardDenied">0</span>
-              <span class="card-label">Acessos Negados</span>
+              <span class="card-label">Denied Accesses</span>
             </div>
             <div class="card-progress">
               <div class="progress-bar denied-bar" id="progressDenied" style="width:0%"></div>
@@ -1284,18 +1284,18 @@ body::after {
   <div class="modal-backdrop" id="enrollModalBackdrop" style="display:none;">
     <div class="modal-box">
       <div class="modal-header">
-        <h3>Cadastrar Novo Rosto</h3>
+        <h3>Enroll New Face</h3>
         <button class="modal-close" onclick="closeEnrollModal()">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
       <div class="modal-body">
-        <label for="enrollNameInput">Nome da Pessoa</label>
-        <input type="text" id="enrollNameInput" placeholder="Ex: João da Silva" />
+        <label for="enrollNameInput">Person Name</label>
+        <input type="text" id="enrollNameInput" placeholder="Ex: John Doe" />
       </div>
       <div class="modal-footer">
-        <button class="btn-secondary" onclick="closeEnrollModal()">Cancelar</button>
-        <button class="btn-primary" onclick="confirmEnroll()">Iniciar Cadastro</button>
+        <button class="btn-secondary" onclick="closeEnrollModal()">Cancel</button>
+        <button class="btn-primary" onclick="confirmEnroll()">Start Enrollment</button>
       </div>
     </div>
   </div>
@@ -1349,7 +1349,7 @@ window.addEventListener('DOMContentLoaded', () => {
 function connectToESP() {
   const rawIp = document.getElementById('espIpInput').value.trim();
   if (!rawIp) {
-    showToast('Digite o IP do ESP32!', 'warning');
+    showToast('Enter the ESP32 IP!', 'warning');
     document.getElementById('espIpInput').focus();
     return;
   }
@@ -1359,7 +1359,7 @@ function connectToESP() {
   state.esp32Ip = ip;
   localStorage.setItem('esp32ip', ip);
 
-  showToast('Conectando ao ESP32...', 'info');
+  showToast('Connecting to ESP32...', 'info');
   startStream(ip);
 }
 
@@ -1367,8 +1367,8 @@ function disconnectFromESP() {
   stopStream();
   clearStatusPoll();
   setConnectedUI(false);
-  showToast('Desconectado do ESP32', 'info');
-  addLogEntry('info', 'Sessão encerrada', `Desconectado de ${state.esp32Ip}`);
+  showToast('Disconnected from ESP32', 'info');
+  addLogEntry('info', 'Session ended', `Disconnected from ${state.esp32Ip}`);
 }
 
 function startStream(ip) {
@@ -1384,7 +1384,7 @@ function startStream(ip) {
     // Se falhar o stream de imagem pura, tenta reconectar
     stopStream();
     setConnectedUI(false);
-    showToast(`Não foi possível conectar ao stream.\nVerifique o IP e se o ESP32 está online.`, 'error');
+    showToast(`Could not connect to stream.\nCheck IP and if ESP32 is online.`, 'error');
   };
 
   img.onload = () => {
@@ -1392,9 +1392,9 @@ function startStream(ip) {
     img.style.display = 'block';
     overlay.style.display = 'block';
     setConnectedUI(true);
-    showToast('Câmera conectada com sucesso!', 'success');
+    showToast('Camera connected successfully!', 'success');
     startStatusPoll(ip);
-    addLogEntry('info', 'Câmera conectada', `Stream iniciado em ${streamUrl}`);
+    addLogEntry('info', 'Camera connected', `Stream started at ${streamUrl}`);
   };
 
   // Dispara o carregamento do stream
@@ -1437,12 +1437,12 @@ function setConnectedUI(connected) {
 
   if (connected) {
     dot.className = 'status-dot connected';
-    label.textContent = `Conectado — ${state.esp32Ip}`;
+    label.textContent = `Connected — ${state.esp32Ip}`;
     liveBadge.className = 'live-badge live';
-    liveBadge.innerHTML = '<span class="live-dot"></span> AO VIVO';
+    liveBadge.innerHTML = '<span class="live-dot"></span> LIVE';
   } else {
     dot.className = 'status-dot';
-    label.textContent = 'Desconectado';
+    label.textContent = 'Disconnected';
     liveBadge.className = 'live-badge';
     liveBadge.innerHTML = '<span class="live-dot"></span> OFFLINE';
     document.getElementById('statSharp').textContent = '--';
@@ -1479,8 +1479,8 @@ async function pollStatus(ip) {
       stopStream();
       setConnectedUI(false);
       clearStatusPoll();
-      showToast('Conexão com o ESP32 perdida!', 'error');
-      addLogEntry('denied', 'Conexão perdida', `ESP32 em ${ip} ficou offline`);
+      showToast('Connection to ESP32 lost!', 'error');
+      addLogEntry('denied', 'Connection lost', `ESP32 at ${ip} went offline`);
     }
   }
 }
@@ -1495,9 +1495,9 @@ function applyStatusToUI(data) {
 
   if (data.last_acc && data.last_acc !== lastAccessStateStr) {
     if (data.last_acc === 'granted') {
-      registerAccessEvent(true, `Rosto: ${data.last_name}`);
+      registerAccessEvent(true, `Face: ${data.last_name}`);
     } else if (data.last_acc === 'denied') {
-      registerAccessEvent(false, `Motivo: ${data.last_name}`);
+      registerAccessEvent(false, `Reason: ${data.last_name}`);
     }
     lastAccessStateStr = data.last_acc;
   }
@@ -1508,7 +1508,7 @@ function applyStatusToUI(data) {
 /* ===================== CAMERA CONTROLS ===================== */
 async function sendControl(cmd, extraParams = '') {
   if (!state.connected) {
-    showToast('Conecte ao ESP32 primeiro!', 'warning');
+    showToast('Connect to ESP32 first!', 'warning');
     return false;
   }
 
@@ -1517,7 +1517,7 @@ async function sendControl(cmd, extraParams = '') {
     const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
     return res.ok;
   } catch (e) {
-    showToast(`Erro ao enviar comando: ${cmd}`, 'error');
+    showToast(`Error sending command: ${cmd}`, 'error');
     return false;
   }
 }
@@ -1529,7 +1529,7 @@ async function toggleContinuous() {
     state.isContinuous = !state.isContinuous;
     updateControlButtons();
     showToast(
-      state.isContinuous ? 'Modo Contínuo Ativado' : 'Inspeção Pausada',
+      state.isContinuous ? 'Continuous Mode Enabled' : 'Inspection Paused',
       state.isContinuous ? 'success' : 'info'
     );
   }
@@ -1538,7 +1538,7 @@ async function toggleContinuous() {
 async function testAccess() {
   const ok = await sendControl('t');
   if (ok) {
-    showToast('Iniciando tentativa de acesso...', 'info');
+    showToast('Initiating access attempt...', 'info');
   }
 }
 
@@ -1571,8 +1571,8 @@ async function confirmEnroll() {
   const ok = await sendControl('m', extraParams);
   if (ok) {
     const nameStr = nameVal ? ` (${nameVal})` : '';
-    showToast(`📸 Cadastramento múltiplo iniciado! Olhe para a câmera.${nameStr}`, 'warning');
-    addLogEntry('info', 'Cadastramento iniciado', `Aguardando rosto...${nameStr}`);
+    showToast(`📸 Multiple enrollment started! Look at the camera.${nameStr}`, 'warning');
+    addLogEntry('info', 'Enrollment started', `Waiting for face...${nameStr}`);
   }
 }
 
@@ -1594,8 +1594,8 @@ function updateControlButtons() {
  */
 function registerAccessEvent(granted, detail = '') {
   const type = granted ? 'granted' : 'denied';
-  const label = granted ? 'Acesso Liberado' : 'Acesso Negado';
-  const fullDetail = detail || (granted ? 'Rosto reconhecido com sucesso' : 'Rosto não encontrado no cadastro');
+  const label = granted ? 'Access Granted' : 'Access Denied';
+  const fullDetail = detail || (granted ? 'Face successfully recognized' : 'Face not found in database');
 
   // Adiciona ao log e exibe a notificação toast na tela
   addLogEntry(type, label, fullDetail);
@@ -1700,20 +1700,20 @@ function filterLog(filter, btn) {
 }
 
 function clearLog() {
-  if (state.logEntries.length === 0) { showToast('Registro já está vazio.', 'info'); return; }
-  if (!confirm('Apagar todo o registro de acessos?')) return;
+  if (state.logEntries.length === 0) { showToast('Log is already empty.', 'info'); return; }
+  if (!confirm('Clear all access logs?')) return;
   state.logEntries = [];
   try { localStorage.removeItem('faceLogs'); } catch (e) { }
   recalcCounters();
   renderLog();
   updateCards();
-  showToast('Registro apagado.', 'info');
+  showToast('Log cleared.', 'info');
 }
 
 function exportLog() {
-  if (state.logEntries.length === 0) { showToast('Nenhum registro para exportar.', 'warning'); return; }
+  if (state.logEntries.length === 0) { showToast('No log to export.', 'warning'); return; }
   const lines = [
-    'Data/Hora,Tipo,Evento,Detalhe',
+    'Date/Time,Type,Event,Detail',
     ...state.logEntries.map(e =>
       `"${formatTimestamp(e.timestamp)}","${e.type}","${e.label}","${e.detail || ''}"`
     )
@@ -1725,7 +1725,7 @@ function exportLog() {
   a.download = `faceguard_log_${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   URL.revokeObjectURL(url);
-  showToast('Registro exportado como CSV!', 'success');
+  showToast('Log exported as CSV!', 'success');
 }
 
 /* ===================== SUMMARY CARDS ===================== */
@@ -1780,12 +1780,12 @@ document.addEventListener('keydown', (e) => {
 
 /* ===================== HELPERS ===================== */
 function getTimestamp() {
-  return new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 function formatTimestamp(iso) {
   const d = new Date(iso);
-  return d.toLocaleString('pt-BR', {
+  return d.toLocaleString('en-US', {
     day: '2-digit', month: '2-digit', year: 'numeric',
     hour: '2-digit', minute: '2-digit', second: '2-digit',
   });
