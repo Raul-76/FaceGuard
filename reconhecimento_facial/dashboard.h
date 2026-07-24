@@ -1327,7 +1327,9 @@ const state = {
   currentFilter: 'all',
   totalGranted: 0,
   totalDenied: 0,
-  statusPollInterval: null
+  statusPollInterval: null,
+  lastEnrollStatus: 'idle',
+  lastEnrollMsg: '-'
 };
 let lastAccessStateStr = "-";
 
@@ -1500,6 +1502,21 @@ function applyStatusToUI(data) {
       registerAccessEvent(false, `Reason: ${data.last_name}`);
     }
     lastAccessStateStr = data.last_acc;
+  }
+
+  // Handle enrollment status
+  if (data.enroll_status && data.enroll_msg) {
+    if (data.enroll_status === 'capturing' && data.enroll_msg !== state.lastEnrollMsg) {
+      addLogEntry('info', 'Enrollment Progress', data.enroll_msg);
+    } else if (data.enroll_status === 'success' && state.lastEnrollStatus !== 'success') {
+      showToast(`Enrollment Successful: ${data.enroll_msg}`, 'success');
+      addLogEntry('granted', 'Enrollment Completed', data.enroll_msg);
+    } else if (data.enroll_status === 'failed' && state.lastEnrollStatus !== 'failed') {
+      showToast(`Enrollment Failed: ${data.enroll_msg}`, 'error');
+      addLogEntry('denied', 'Enrollment Failed', data.enroll_msg);
+    }
+    state.lastEnrollStatus = data.enroll_status;
+    state.lastEnrollMsg = data.enroll_msg;
   }
 }
 

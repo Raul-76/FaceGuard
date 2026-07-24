@@ -174,6 +174,8 @@ volatile char httpCommand = 0; // comando web atômico ('c', 'r', 'p', 't', 'm')
 char httpCommandName[64] = ""; // nome passado via web (para 'c' e 'm')
 String lastAccType = "-";      // "granted", "denied" ou "-"
 String lastAccName = "-";      // nome ou "desconhecido"
+String enrollStatus = "idle";
+String enrollMsg = "-";
 
 /**
  * Toca a melodia de forma BLOQUEANTE (usa delay).
@@ -473,9 +475,9 @@ static uint8_t *g_jpg = nullptr; // copia do ultimo frame (PSRAM)
 static size_t g_jpgLen = 0;
 static volatile uint32_t g_frameId = 0; // contador: sinaliza frame novo
 static SemaphoreHandle_t g_mutex = nullptr;
-static char g_info[350] =
+static char g_info[512] =
     "{\"face\":0,\"sharp\":0,\"peak\":0,\"ldr\":0,\"name\":\"-\",\"sim\":\"-\","
-    "\"last_acc\":\"-\",\"last_name\":\"-\"}";
+    "\"last_acc\":\"-\",\"last_name\":\"-\",\"enroll_status\":\"idle\",\"enroll_msg\":\"-\"}";
 static httpd_handle_t g_server = nullptr;
 static httpd_handle_t g_stream = nullptr;
 
@@ -494,6 +496,23 @@ void publishFrame(const uint8_t *buf, size_t len) {
   g_jpgLen = len;
   g_frameId++;
   xSemaphoreGive(g_mutex);
+}
+
+void updateGInfo(int face, uint32_t sharp, uint32_t peak, uint16_t ldr, const char* name, const char* sim) {
+  snprintf(g_info, sizeof(g_info),
+           "{\"face\":%d,\"sharp\":%u,\"peak\":%u,\"ldr\":%u,\"name\":\"%s\","
+           "\"sim\":\"%s\",\"last_acc\":\"%s\",\"last_name\":\"%s\","
+           "\"enroll_status\":\"%s\",\"enroll_msg\":\"%s\"}",
+           face, (unsigned)sharp, (unsigned)peak, (unsigned)ldr, name, sim,
+           lastAccType.c_str(), lastAccName.c_str(), 
+           enrollStatus.c_str(), enrollMsg.c_str());
+}
+
+void updateEnrollStatus(const char* status, const char* msg) {
+  enrollStatus = status;
+  enrollMsg = msg;
+  uint32_t sharp = (camera.frame != nullptr) ? camera.frame->len : 0;
+  updateGInfo(0, sharp, sharpMax, lerLDR(), "-", "-");
 }
 
 // ==================== HTTP ====================
@@ -863,12 +882,7 @@ void loop() {
   if (modoContinuo)
     runRecognition();
   else
-    snprintf(
-        g_info, sizeof(g_info),
-        "{\"face\":0,\"sharp\":%u,\"peak\":%u,\"ldr\":%u,\"name\":\"(pausado)"
-        "\",\"sim\":\"-\",\"last_acc\":\"%s\",\"last_name\":\"%s\"}",
-        (unsigned)sharp, (unsigned)sharpMax, (unsigned)lerLDR(),
-        lastAccType.c_str(), lastAccName.c_str());
+    updateGInfo(0, sharp, sharpMax, lerLDR(), "(pausado)", "-");
 
   delay(10);
 }
@@ -885,32 +899,22 @@ void runRecognition() {
 
   // Sem rosto na cena.
   if (!recognition.detect().isOk()) {
-    snprintf(g_info, sizeof(g_info),
-             "{\"face\":0,\"sharp\":%u,\"peak\":%u,\"ldr\":%u,\"name\":\"-\","
-             "\"sim\":\"-\",\"last_acc\":\"%s\",\"last_name\":\"%s\"}",
-             (unsigned)sharp, (unsigned)sharpMax, (unsigned)ldr,
-             lastAccType.c_str(), lastAccName.c_str());
+    updateGInfo(0, sharp, sharpMax, ldr, "-", "-");
     return;
   }
 
   // Rosto detectado, mas sem match (face:1, name:"?").
   if (!recognition.recognize().isOk()) {
-    snprintf(g_info, sizeof(g_info),
-             "{\"face\":1,\"sharp\":%u,\"peak\":%u,\"ldr\":%u,\"name\":\"?\","
-             "\"sim\":\"-\",\"last_acc\":\"%s\",\"last_name\":\"%s\"}",
-             (unsigned)sharp, (unsigned)sharpMax, (unsigned)ldr,
-             lastAccType.c_str(), lastAccName.c_str());
+    updateGInfo(1, sharp, sharpMax, ldr, "?", "-");
     return;
   }
 
   const char *name = recognition.match.name.c_str();
   float sim = recognition.match.similarity;
+  char simStr[16];
+  snprintf(simStr, sizeof(simStr), "%.4f", sim);
 
-  snprintf(g_info, sizeof(g_info),
-           "{\"face\":1,\"sharp\":%u,\"peak\":%u,\"ldr\":%u,\"name\":\"%s\","
-           "\"sim\":\"%.4f\",\"last_acc\":\"%s\",\"last_name\":\"%s\"}",
-           (unsigned)sharp, (unsigned)sharpMax, (unsigned)ldr, name, sim,
-           lastAccType.c_str(), lastAccName.c_str());
+  updateGInfo(1, sharp, sharpMax, ldr, name, simStr);
 
   // Throttle: imprimir a cada frame inundaria o serial e atrasaria o stream.
   if (millis() - lastPrint > 400) {
@@ -1004,17 +1008,18 @@ void enrollMultiplo(int alvo, String defaultName) {
 
   while (ok < alvo) {
     if (tentativas >= MAX_TENTATIVAS) {
-      Serial.printf(">> Desisti: so %d/%d salvas em %d tentativas\n", ok, alvo,
-                    tentativas);
+      String msg = String("Desisti: so ") + ok + "/" + alvo + " salvas em " + tentativas + " tentativas";
+      Serial.println(">> " + msg);
+      updateEnrollStatus("failed", msg.c_str());
       analogWrite(pinoAzul, 0);
       analogWrite(pinoLuz, 0);
       return;
     }
     tentativas++;
 
-    Serial.printf("   captura %d/%d (tentativa %d) - posicione o rosto e fique "
-                  "PARADO...\n",
-                  ok + 1, alvo, tentativas);
+    String msg = String("captura ") + (ok + 1) + "/" + alvo + " (tentativa " + tentativas + ") - posicione o rosto e fique PARADO...";
+    Serial.println("   " + msg);
+    updateEnrollStatus("capturing", msg.c_str());
 
     // ~2s de espera entre capturas, mantendo feed, LED e controle vivos.
     for (int k = 0; k < 20; k++) {
@@ -1032,30 +1037,39 @@ void enrollMultiplo(int alvo, String defaultName) {
 
     if (!camera.capture().isOk()) {
       Serial.println("   captura falhou, repetindo");
+      updateEnrollStatus("capturing", "captura falhou, repetindo");
       continue;
     }
     publishFrame(camera.frame->buf, camera.frame->len);
 
     if (!frameOk(motivo)) {
-      Serial.printf("   descartei (%s), repetindo\n", motivo);
+      String msg = String("descartei (") + motivo + "), repetindo";
+      Serial.println("   " + msg);
+      updateEnrollStatus("capturing", msg.c_str());
       continue;
     }
 
     if (!recognition.detect().isOk()) {
       Serial.println("   sem rosto, repetindo");
+      updateEnrollStatus("capturing", "sem rosto, repetindo");
       continue;
     }
 
     if (recognition.enroll(nome).isOk()) {
       ok++;
-      Serial.printf("   OK (%d/%d boas)\n", ok, alvo);
+      String msg = String("OK (") + ok + "/" + alvo + " boas)";
+      Serial.println("   " + msg);
+      updateEnrollStatus("capturing", msg.c_str());
     } else {
-      Serial.println(recognition.exception.toString());
+      String msg = recognition.exception.toString();
+      Serial.println(msg);
+      updateEnrollStatus("capturing", msg.c_str());
     }
   }
 
-  Serial.printf(">> Multi-enroll concluido: %d/%d capturas boas para '%s'\n",
-                ok, alvo, nome.c_str());
+  String finalMsg = String("Multi-enroll concluido: ") + ok + "/" + alvo + " capturas boas para '" + nome + "'";
+  Serial.println(">> " + finalMsg);
+  updateEnrollStatus("success", finalMsg.c_str());
   analogWrite(pinoAzul, 0);
   analogWrite(pinoLuz, 0);
 }
