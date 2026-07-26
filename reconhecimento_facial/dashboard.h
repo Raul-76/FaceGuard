@@ -11,9 +11,7 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FaceGuard ESP32 Monitor</title>
   <meta name="description" content="Real-time monitoring dashboard with live camera feed and access logs for the ESP32 facial recognition system." />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
   <style>
 /* =====================================================
    FaceGuard Dashboard — style.css
@@ -496,6 +494,9 @@ body::after {
   pointer-events: none;
 }
 
+/* A barra de scan fica ESCONDIDA por padrao. So aparece quando o
+   overlay recebe a classe "scanning" (ligada via JS durante uma
+   tentativa de reconhecimento, seja pela web ou pelo botao fisico). */
 .scan-line {
   position: absolute;
   left: 0; right: 0;
@@ -503,6 +504,10 @@ body::after {
   background: linear-gradient(90deg, transparent, var(--accent), transparent);
   animation: scan 3s linear infinite;
   opacity: 0.5;
+  display: none;
+}
+.camera-overlay.scanning .scan-line {
+  display: block;
 }
 
 @keyframes scan {
@@ -583,6 +588,14 @@ body::after {
   align-items: center;
   padding: 12px 20px;
   gap: 0;
+}
+
+/* Escondida por padrao. So aparece quando ganha a classe "visible". */
+.stats-bar {
+  display: none;
+}
+.stats-bar.visible {
+  display: flex;
 }
 
 .stat-item {
@@ -1141,16 +1154,21 @@ body::after {
       <!-- ===== LEFT: CAMERA PANEL ===== -->
       <div class="panel camera-panel">
         <div class="panel-header">
-          <div class="panel-title">
-            <div class="panel-icon camera-icon">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
-            </div>
-            Live Camera
-          </div>
-          <div class="live-badge" id="liveBadge">
-            <span class="live-dot"></span> OFFLINE
-          </div>
-        </div>
+  <div class="panel-title">
+    <div class="panel-icon camera-icon">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+    </div>
+    Live Camera
+  </div>
+  <div style="display:flex; align-items:center; gap:8px;">
+    <button class="icon-btn" id="btnToggleStats" onclick="toggleStats()" title="Show technical details">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
+    <div class="live-badge" id="liveBadge">
+      <span class="live-dot"></span> OFFLINE
+    </div>
+  </div>
+</div>
 
         <div class="camera-container" id="cameraContainer">
           <div class="camera-placeholder" id="cameraPlaceholder">
@@ -1311,16 +1329,15 @@ body::after {
  * ESP32 Facial Recognition Monitor
  * 
  * ESP32 Endpoints:
- *   GET  http://{IP}/         → Página padrão
- *   GET  http://{IP}/status   → Status JSON da câmera
- *   GET  http://{IP}/control?var=face_detect&val=1  → Controles
- *   GET  http://{IP}:81/stream → MJPEG stream ao vivo
- *   GET  http://{IP}/capture   → Foto JPEG
+ *   GET  http://{IP}/         -> Pagina padrao
+ *   GET  http://{IP}/info     -> Status JSON da camera
+ *   GET  http://{IP}/control?cmd=X&name=Y -> Controles
+ *   GET  http://{IP}:81/stream -> MJPEG stream ao vivo
  */
 
 /* ===================== STATE ===================== */
 const state = {
-  esp32Ip: localStorage.getItem('esp32ip') || (window.location.protocol.startsWith('http') ? window.location.host : ''),
+  esp32Ip: (window.location.protocol.startsWith('http') && window.location.host) ? window.location.host : (localStorage.getItem('esp32ip') || ''),
   connected: false,
   isContinuous: false,
   logEntries: JSON.parse(localStorage.getItem('faceLogs') || '[]'),
@@ -1329,7 +1346,8 @@ const state = {
   totalDenied: 0,
   statusPollInterval: null,
   lastEnrollStatus: 'idle',
-  lastEnrollMsg: '-'
+  lastEnrollMsg: '-',
+  lastScanning: false
 };
 let lastAccessStateStr = "-";
 
@@ -1374,8 +1392,8 @@ function disconnectFromESP() {
 }
 
 function startStream(ip) {
-  // O feed de vídeo do ESP32 roda na porta 81, separada da porta 80 (API)
-  const baseIp = ip.split(':')[0]; // Remove qualquer porta caso o usuário tenha digitado
+  // O feed de video do ESP32 roda na porta 81, separada da porta 80 (API)
+  const baseIp = ip.split(':')[0]; // Remove qualquer porta caso o usuario tenha digitado
   const streamUrl = `http://${baseIp}:81/stream`;
 
   const img = document.getElementById('cameraStream');
@@ -1402,7 +1420,7 @@ function startStream(ip) {
   // Dispara o carregamento do stream
   img.src = streamUrl;
 
-  // Verifica a conexão de status
+  // Verifica a conexao de status
   checkStatusAndConnect(ip, streamUrl);
 }
 
@@ -1414,7 +1432,7 @@ async function checkStatusAndConnect(ip, streamUrl) {
       applyStatusToUI(status);
     }
   } catch (e) {
-    // Ignorado pois o img.onerror cuidará se o stream falhar
+    // Ignorado pois o img.onerror cuidara se o stream falhar
   }
 }
 
@@ -1426,6 +1444,7 @@ function stopStream() {
   img.onerror = null; // Previne loop infinito
   img.removeAttribute('src');
   img.style.display = 'none';
+  overlay.classList.remove('scanning');
   overlay.style.display = 'none';
   placeholder.style.display = 'flex';
 }
@@ -1495,6 +1514,22 @@ function applyStatusToUI(data) {
   state.isContinuous = (data.name !== "(pausado)");
   updateControlButtons();
 
+  // ---- Barra de scan: liga/desliga com base no campo "scanning" ----
+  // reportado pelo ESP no /info. Isso funciona tanto para o disparo
+  // pela web (botao "Test Access") quanto pelo botao fisico (GPIO21),
+  // porque em ambos os casos o ESP muda esse campo durante a tentativa.
+  if (typeof data.scanning !== 'undefined') {
+    const scanningNow = (data.scanning === true || data.scanning === 1 || data.scanning === "1" || data.scanning === "true");
+    if (scanningNow !== state.lastScanning) {
+      const overlay = document.getElementById('cameraOverlay');
+      if (overlay) {
+        if (scanningNow) overlay.classList.add('scanning');
+        else overlay.classList.remove('scanning');
+      }
+      state.lastScanning = scanningNow;
+    }
+  }
+
   if (data.last_acc && data.last_acc !== lastAccessStateStr) {
     if (data.last_acc === 'granted') {
       registerAccessEvent(true, `Face: ${data.last_name}`);
@@ -1556,6 +1591,12 @@ async function testAccess() {
   const ok = await sendControl('t');
   if (ok) {
     showToast('Initiating access attempt...', 'info');
+    // Liga a barra de scan otimisticamente; o poll do /info confirma
+    // (ou corrige) o estado real em ate 3s, e desliga sozinha quando
+    // a tentativa terminar (last_acc muda ou scanning volta a false).
+    const overlay = document.getElementById('cameraOverlay');
+    if (overlay) overlay.classList.add('scanning');
+    state.lastScanning = true;
   }
 }
 
@@ -1598,6 +1639,14 @@ function updateControlButtons() {
   if (btnC) btnC.className = 'ctrl-btn' + (state.isContinuous ? ' active' : '');
 }
 
+function toggleStats() {
+  const bar = document.getElementById('statsBar');
+  const btn = document.getElementById('btnToggleStats');
+  if (!bar) return;
+  const showing = bar.classList.toggle('visible');
+  if (btn) btn.classList.toggle('active', showing);
+}
+
 
 
 /* ===================== MANUAL LOG (for demonstration) ===================== */
@@ -1606,15 +1655,15 @@ function updateControlButtons() {
 
 /**
  * Public function — can be called from browser console for testing:
- *   registerAccessEvent(true, "ID 1 - João")
- *   registerAccessEvent(false, "Rosto desconhecido")
+ *   registerAccessEvent(true, "ID 1 - John")
+ *   registerAccessEvent(false, "Unknown face")
  */
 function registerAccessEvent(granted, detail = '') {
   const type = granted ? 'granted' : 'denied';
   const label = granted ? 'Access Granted' : 'Access Denied';
   const fullDetail = detail || (granted ? 'Face successfully recognized' : 'Face not found in database');
 
-  // Adiciona ao log e exibe a notificação toast na tela
+  // Adiciona ao log e exibe a notificacao toast na tela
   addLogEntry(type, label, fullDetail);
 
   showToast(
