@@ -596,19 +596,23 @@ static esp_err_t streamHandler(httpd_req_t *req) {
 
 static esp_err_t indexHandler(httpd_req_t *req) {
   httpd_resp_set_type(req, "text/html");
-  const char *ptr = INDEX_HTML;
-  size_t len = strlen(INDEX_HTML);
-  const size_t CHUNK = 8192;
-  
-  while (len > 0) {
-    size_t to_send = (len < CHUNK) ? len : CHUNK;
-    if (httpd_resp_send_chunk(req, ptr, to_send) != ESP_OK) {
+  // no-store: impede o navegador de servir uma versao velha em cache
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+
+  // Manda o HTML em pedacos de 1KB (chunked). Pagina grande as vezes
+  // falha quando enviada de uma vez so; em pedacos e robusto.
+  const size_t CHUNK = 1024;
+  size_t total = strlen(INDEX_HTML);
+  size_t sent = 0;
+  while (sent < total) {
+    size_t n = (total - sent > CHUNK) ? CHUNK : (total - sent);
+    if (httpd_resp_send_chunk(req, INDEX_HTML + sent, n) != ESP_OK) {
       return ESP_FAIL;
     }
-    ptr += to_send;
-    len -= to_send;
+    sent += n;
   }
-  return httpd_resp_send_chunk(req, NULL, 0);
+  httpd_resp_send_chunk(req, NULL, 0); // finaliza a resposta
+  return ESP_OK;
 }
 
 void startServer() {
@@ -619,6 +623,9 @@ void startServer() {
   cfg.max_uri_handlers = 8;
   cfg.stack_size = 8192;
   cfg.lru_purge_enable = true;
+  cfg.recv_wait_timeout = 10;   // segundos: nao derruba conexao lenta no meio
+  cfg.send_wait_timeout = 10;   // idem no envio da pagina grande
+  
 
   if (httpd_start(&g_server, &cfg) != ESP_OK) {
     Serial.println("ERRO: httpd porta 80 falhou");
@@ -952,7 +959,7 @@ void doEnroll(String defaultName) {
 
   analogWrite(pinoLuz, dutyLuz); // acende no duty aprendido
 
-  Serial.println("Posicione o rosto. Cadastrando em 3s...");
+  Serial.println("Position your face. Registering in 3 seconds...");
   for (int i = 0; i < 30;
        i++) { // 30 x 100ms: tempo de sobra pro controle convergir
     if (camera.capture().isOk()) {
@@ -1018,9 +1025,9 @@ void enrollMultiplo(int alvo, String defaultName) {
 
   analogWrite(pinoLuz, dutyLuz); // acende no duty aprendido
 
-  while (ok < alvo) {
+while (ok < alvo) {
     if (tentativas >= MAX_TENTATIVAS) {
-      String msg = String("Desisti: so ") + ok + "/" + alvo + " salvas em " + tentativas + " tentativas";
+      String msg = String("Failed: only ") + ok + "/" + alvo + " saved after " + tentativas + " attempts";
       Serial.println(">> " + msg);
       updateEnrollStatus("failed", msg.c_str());
       analogWrite(pinoAzul, 0);
@@ -1029,11 +1036,11 @@ void enrollMultiplo(int alvo, String defaultName) {
     }
     tentativas++;
 
-    String msg = String("captura ") + (ok + 1) + "/" + alvo + " (tentativa " + tentativas + ") - posicione o rosto e fique PARADO...";
+    String msg = String("Capture ") + (ok + 1) + "/" + alvo + " (attempt " + tentativas + ") - align your face and stay STILL...";
     Serial.println("   " + msg);
     updateEnrollStatus("capturing", msg.c_str());
 
-    // ~2s de espera entre capturas, mantendo feed, LED e controle vivos.
+    // ~2 s between captures, keeping the watchdog, LED, and control loop running.
     for (int k = 0; k < 20; k++) {
       if (camera.capture().isOk()) {
         publishFrame(camera.frame->buf, camera.frame->len);
