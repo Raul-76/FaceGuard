@@ -22,6 +22,8 @@
 #include <esp_http_server.h> // servidor HTTP nativo do IDF (mais leve que WebServer.h)
 #include <math.h>            // sin() do pulso do LED
 
+#include <ESPmDNS.h>
+
 #include "dashboard.h"
 #include "driver/rtc_io.h" // pull-up no dominio RTC (sobrevive ao sono)
 #include "esp_sleep.h"     // deep sleep
@@ -883,6 +885,15 @@ void setup() {
   Serial.println();
 
   startServer();
+
+  // mDNS: dá um nome amigável à placa. Acesse http://fechadura.local
+  if (MDNS.begin("FaceGuard")) {
+    MDNS.addService("http", "tcp", 80);   // registra o servidor web
+    Serial.println(">>> Nome de rede: http://FaceGuard.local");
+  } else {
+    Serial.println(">>> AVISO: mDNS falhou (use o IP abaixo)");
+  }
+
   Serial.print(">>> ABRA NO NAVEGADOR:  http://");
   Serial.println(WiFi.localIP());
   Serial.println();
