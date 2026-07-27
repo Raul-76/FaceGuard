@@ -55,16 +55,16 @@ const int pinoLDR = 2;
 // CALIBRACAO OBRIGATORIA: rode o comando 'l' e anote a leitura crua no seu
 // ambiente. Os valores abaixo sao ponto de partida, nao verdade absoluta --
 // dependem do LDR, do resistor e da luz do local.
-const int LDR_ALVO = 2000;   // leitura desejada (0..4095)
+const int LDR_ALVO = 3000;   // leitura desejada (0..4095)
 const int BANDA_MORTA = 150; // nao mexe se estiver perto do alvo.
                              // Sem banda morta o controle OSCILA em torno
                              // do setpoint, e luz piscando estraga a
                              // consistencia dos embeddings.
-const int DUTY_MIN = 1;      // nunca apaga de vez durante a operacao
+const int DUTY_MIN = 70;      // nunca apaga de vez durante a operacao
 const int DUTY_MAX = 255;
 const int PASSO_DUTY = 2; // ajuste INCREMENTAL, nao proporcional:
                           // mover pouco por vez tambem evita oscilacao
-int dutyLuz = 30;         // ponto de partida
+int dutyLuz = 70;         // ponto de partida
 
 // Botao momentaneo que dispara uma tentativa de reconhecimento.
 const int iniciarReconhecimento = 21;
@@ -103,9 +103,9 @@ const Nota somAcessoNegado[] = {{600, 150}, // ataque imediato
                                 {0, 0}};
 
 // ==================== VOTACAO POR RAJADA ====================
-#define ALVO_NOME "caio" // unico nome autorizado a abrir
+
 #define PISO_SIM                                                               \
-  0.92f                  // similaridade minima pra um frame virar VOTO.
+  0.91f                  // similaridade minima pra um frame virar VOTO.
                          // Este e o gate REAL de seguranca -- deve ficar
                          // acima do teto observado do impostor e abaixo
                          // do chao observado do dono. MEDIR e ajustar.
@@ -149,6 +149,17 @@ const Nota somAcessoNegado[] = {{600, 150}, // ataque imediato
 // -> erro "'Veredito' does not name a type".
 enum Veredito { PENDENTE, APROVADO, NEGADO, EXPIROU };
 
+// modo do LED azul, escrito pela task da camera, lido pela task do LED
+enum EstadoLED { LED_OFF, LED_RESPIRANDO };
+volatile EstadoLED estadoLED = LED_OFF;
+
+// pedido de tentativa: setado pelo botao (loop), consumido pela task da camera
+volatile bool pedidoReconhecimento = false;
+
+TaskHandle_t handleCamera = nullptr;
+TaskHandle_t handleLED = nullptr;
+
+
 // Prototipos explicitos (nao dependemos da geracao automatica do IDE).
 String prompt(String message);
 String promptTimeout(String message, uint32_t ms);
@@ -176,6 +187,59 @@ String lastAccType = "-";      // "granted", "denied" ou "-"
 String lastAccName = "-";      // nome ou "desconhecido"
 String enrollStatus = "idle";
 String enrollMsg = "-";
+
+
+void tarefaLED(void *pv) {
+  for (;;) {
+    if (estadoLED == LED_RESPIRANDO) {
+      float onda = (sin(millis() / 300.0) + 1) / 2;
+      analogWrite(pinoAzul, (int)(onda * 255));
+    } else {
+      analogWrite(pinoAzul, 0);
+    }
+    vTaskDelay(pdMS_TO_TICKS(20)); // ~50 updates/s, independe da inferencia
+  }
+}
+
+void tarefaCamera(void *pv) {
+  for (;;) {
+    // comando pendente (web ou serial funilam no mesmo httpCommand)
+    if (httpCommand != 0) {
+      char cmd = httpCommand;
+      httpCommand = 0;
+      switch (cmd) {
+        case 'c': modoContinuo = false;
+                  doEnroll(httpCommandName[0] ? String(httpCommandName) : ""); break;
+        case 'm': modoContinuo = false;
+                  enrollMultiplo(5, httpCommandName[0] ? String(httpCommandName) : ""); break;
+        case 'r': modoContinuo = true;  Serial.println(">> MODO CONTINUO"); break;
+        case 'p': modoContinuo = false; Serial.println(">> PAUSADO"); break;
+        case 't': pedidoReconhecimento = true; break;
+        case 'd': recognition.dump(); break;
+        case 'z': sharpMax = 0; Serial.println(">> pico zerado"); break;
+        case 'l': modoContinuo = false; testeLuz(); break;
+      }
+    }
+
+    if (pedidoReconhecimento) {
+      pedidoReconhecimento = false;
+      runTentativa();
+    }
+
+    // captura + publica sempre (feed vivo)
+    if (!camera.capture().isOk()) { vTaskDelay(pdMS_TO_TICKS(30)); continue; }
+    publishFrame(camera.frame->buf, camera.frame->len);
+
+    uint32_t sharp = camera.frame->len;
+    if (sharp > sharpMax) sharpMax = sharp;
+
+    if (modoContinuo) runRecognition();
+    else updateGInfo(0, sharp, sharpMax, lerLDR(), "(pausado)", "-");
+
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+}
+
 
 /**
  * Toca a melodia de forma BLOQUEANTE (usa delay).
@@ -301,12 +365,17 @@ void entrarEmDeepSleep() {
  * chamada em TODAS as cinco saidas da tentativa.
  */
 void sinalizaResultado(int pino, const Nota melodia[]) {
+  estadoLED = LED_OFF;                    // <-- para a task de respirar
   analogWrite(pinoAzul, 0);
   digitalWrite(pinoAzul, LOW);
-  analogWrite(pinoLuz, 0); // apaga a iluminacao ao encerrar
+  analogWrite(pinoLuz, 0);
   digitalWrite(pino, HIGH);
   tocarMelodia(melodia);
-  delay(2500); // mantem a cor visivel (simula porta aberta)
+  uint32_t t0 = millis();                 // <-- mantem o feed durante o hold
+  while (millis() - t0 < 2500) {
+    if (camera.capture().isOk()) publishFrame(camera.frame->buf, camera.frame->len);
+    delay(20);
+  }
   digitalWrite(pino, LOW);
 }
 
@@ -372,46 +441,37 @@ bool frameOk(const char *&motivoOut) {
 Veredito runTentativa() {
   int validos = 0;
   int votosFavor = 0;
+  String nomeVotado = "";   // identidade travada no 1o voto valido
   uint32_t t0 = millis();
   const char *motivo = "";
 
-  Serial.println(">> TENTATIVA iniciada");
-
-  analogWrite(pinoLuz, dutyLuz); // acende no duty aprendido
+  Serial.println(">> ATTEMPT started");
+  estadoLED = LED_RESPIRANDO;
+  analogWrite(pinoLuz, dutyLuz);
 
   while (validos < JANELA_N) {
 
-    pulsaLEDEspera(); // precisa ser chamada no laco pra "respirar"
-
-    // Timeout: rosto nao apareceu ou sumiu no meio.
     if (millis() - t0 > TIMEOUT_MS) {
-      Serial.printf(">> EXPIROU (so %d/%d validos)\n", validos, JANELA_N);
+      Serial.printf(">> TIMEOUT (only %d/%d valid frames)\n", validos, JANELA_N);
       sinalizaResultado(pinoVermelho, somAcessoNegado);
       lastAccType = "denied";
       lastAccName = "timeout";
       return EXPIROU;
     }
 
-    // Frame fresco. A lib gerencia o buffer sozinha (nao ha fb_return).
     if (!camera.capture().isOk()) {
       delay(20);
       continue;
     }
-    publishFrame(camera.frame->buf, camera.frame->len); // mantem o feed vivo
+    publishFrame(camera.frame->buf, camera.frame->len);
 
-    // Controle de luz ANTES do gate: o LDR independe do frame, e se o
-    // gate rejeitasse primeiro o controle nunca agiria quando a cena
-    // estivesse ruim -- justamente quando ele e necessario.
     ajustaLuz();
 
-    // Descarta frame ruim ANTES de gastar inferencia.
     if (!frameOk(motivo)) {
-      Serial.printf("   frame descartado: %s\n", motivo);
-      continue; // nao conta como valido
+      Serial.printf("   Frame discarded: %s\n", motivo);
+      continue;
     }
 
-    // Nenhum dos dois conta como valido se falhar: sem rosto na cena
-    // ou modelo sem resposta nao sao "voto contra", sao "nada".
     if (!recognition.detect().isOk())
       continue;
     if (!recognition.recognize().isOk())
@@ -421,50 +481,64 @@ Veredito runTentativa() {
     const char *nome = recognition.match.name.c_str();
     float sim = recognition.match.similarity;
 
-    // O voto exige AS DUAS coisas: nome certo e similaridade acima do piso.
-    bool aFavor = (strcmp(nome, ALVO_NOME) == 0) && (sim >= PISO_SIM);
+    // Voto: QUALQUER pessoa cadastrada serve, desde que sim >= PISO_SIM.
+    // A identidade e travada no primeiro voto valido -- os K votos precisam
+    // ser da MESMA pessoa, senao ruido em nomes diferentes somaria votos
+    // e liberaria por engano.
+    bool aFavor = false;
+    if (sim >= PISO_SIM) {
+      if (nomeVotado.length() == 0) {
+        nomeVotado = nome;       // trava na primeira identidade valida
+        aFavor = true;
+      } else if (nomeVotado == nome) {
+        aFavor = true;           // mesmo alvo: conta
+      }
+      // nome diferente do travado: nao conta (frame neutro)
+    }
     if (aFavor)
       votosFavor++;
 
-    Serial.printf("   frame %d/%d: %s sim=%.3f -> %s  (favor=%d)\n", validos,
-                  JANELA_N, nome, sim, aFavor ? "VOTO" : "descartado",
-                  votosFavor);
+    Serial.printf("   Frame %d/%d: %s sim=%.3f -> %s (votes=%d for %s)\n",
+                  validos, JANELA_N, nome, sim, aFavor ? "VOTE" : "REJECTED",
+                  votosFavor, nomeVotado.length() ? nomeVotado.c_str() : "-");
 
     // EARLY-EXIT
     if (votosFavor >= VOTOS_K) {
-      Serial.printf(">> APROVADO (early-exit: %d votos em %d frames)\n",
-                    votosFavor, validos);
+      Serial.printf(">> APPROVED (early exit: %d votes in %d frames for %s)\n",
+                    votosFavor, validos, nomeVotado.c_str());
       sinalizaResultado(pinoVerde, somPortaAberta);
       lastAccType = "granted";
-      lastAccName = ALVO_NOME;
+      lastAccName = nomeVotado;
       return APROVADO;
     }
 
-    // EARLY-FAIL: aritmetica simples, ja nao da mais pra atingir K.
+    // EARLY-FAIL
     int restantes = JANELA_N - validos;
     if (votosFavor + restantes < VOTOS_K) {
-      Serial.printf(">> NEGADO (early-fail: %d votos, faltam %d frames)\n",
+      Serial.printf(">> DENIED (early fail: %d votes, %d frames remaining)\n",
                     votosFavor, restantes);
       sinalizaResultado(pinoVermelho, somAcessoNegado);
+      lastAccType = "denied";
+      lastAccName = "unknown";
       return NEGADO;
     }
   }
 
-  // Rede de seguranca: com os early-exit/fail acima o fluxo nao deveria
-  // chegar aqui, mas se chegar, o juiz decide pela contagem final.
+  // Rede de seguranca (nao deveria chegar aqui com os early-exit/fail).
   if (votosFavor >= VOTOS_K) {
-    Serial.printf(">> APROVADO (%d/%d votos)\n", votosFavor, validos);
+    Serial.printf(">> APPROVED (%d/%d votes for %s)\n",
+                  votosFavor, validos, nomeVotado.c_str());
     sinalizaResultado(pinoVerde, somPortaAberta);
     lastAccType = "granted";
-    lastAccName = ALVO_NOME;
+    lastAccName = nomeVotado;
     return APROVADO;
   }
 
-  Serial.printf(">> NEGADO (%d/%d votos, precisava %d)\n", votosFavor, validos,
-                VOTOS_K);
+  Serial.printf(">> DENIED (%d/%d votes, %d required)\n",
+                votosFavor, validos, VOTOS_K);
   sinalizaResultado(pinoVermelho, somAcessoNegado);
   lastAccType = "denied";
-  lastAccName = "desconhecido";
+  lastAccName = "unknown";
   return NEGADO;
 }
 
@@ -475,6 +549,7 @@ static uint8_t *g_jpg = nullptr; // copia do ultimo frame (PSRAM)
 static size_t g_jpgLen = 0;
 static volatile uint32_t g_frameId = 0; // contador: sinaliza frame novo
 static SemaphoreHandle_t g_mutex = nullptr;
+static SemaphoreHandle_t g_infoMutex = nullptr;  
 static char g_info[512] =
     "{\"face\":0,\"sharp\":0,\"peak\":0,\"ldr\":0,\"name\":\"-\",\"sim\":\"-\","
     "\"last_acc\":\"-\",\"last_name\":\"-\",\"enroll_status\":\"idle\",\"enroll_msg\":\"-\"}";
@@ -499,13 +574,18 @@ void publishFrame(const uint8_t *buf, size_t len) {
 }
 
 void updateGInfo(int face, uint32_t sharp, uint32_t peak, uint16_t ldr, const char* name, const char* sim) {
-  snprintf(g_info, sizeof(g_info),
+  char tmp[512];
+  snprintf(tmp, sizeof(tmp),
            "{\"face\":%d,\"sharp\":%u,\"peak\":%u,\"ldr\":%u,\"name\":\"%s\","
            "\"sim\":\"%s\",\"last_acc\":\"%s\",\"last_name\":\"%s\","
            "\"enroll_status\":\"%s\",\"enroll_msg\":\"%s\"}",
            face, (unsigned)sharp, (unsigned)peak, (unsigned)ldr, name, sim,
-           lastAccType.c_str(), lastAccName.c_str(), 
+           lastAccType.c_str(), lastAccName.c_str(),
            enrollStatus.c_str(), enrollMsg.c_str());
+  if (g_infoMutex && xSemaphoreTake(g_infoMutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+    memcpy(g_info, tmp, strlen(tmp) + 1);
+    xSemaphoreGive(g_infoMutex);
+  }
 }
 
 void updateEnrollStatus(const char* status, const char* msg) {
@@ -519,10 +599,17 @@ void updateEnrollStatus(const char* status, const char* msg) {
 
 /** /info -> JSON com as metricas. no-store pro navegador nao cachear. */
 static esp_err_t infoHandler(httpd_req_t *req) {
+  char local[512];
+  if (g_infoMutex && xSemaphoreTake(g_infoMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+    memcpy(local, g_info, sizeof(local));
+    xSemaphoreGive(g_infoMutex);
+  } else {
+    strcpy(local, "{}");
+  }
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Cache-Control", "no-store");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-  return httpd_resp_send(req, g_info, HTTPD_RESP_USE_STRLEN);
+  return httpd_resp_send(req, local, HTTPD_RESP_USE_STRLEN);
 }
 
 static esp_err_t controlHandler(httpd_req_t *req) {
@@ -534,7 +621,26 @@ static esp_err_t controlHandler(httpd_req_t *req) {
     }
     char nameVal[64];
     if (httpd_query_key_value(buf, "name", nameVal, sizeof(nameVal)) == ESP_OK) {
-      strncpy(httpCommandName, nameVal, sizeof(httpCommandName) - 1);
+      // decodifica URL: %XX -> byte, '+' -> espaco
+      char dec[64]; int j = 0;
+      for (int i = 0; nameVal[i] && j < (int)sizeof(dec) - 1; i++) {
+        if (nameVal[i] == '+') {
+          dec[j++] = ' ';
+        } else if (nameVal[i] == '%' && nameVal[i+1] && nameVal[i+2]) {
+          auto hex = [](char c) -> int {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+            if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+            return 0;
+          };
+          dec[j++] = (char)(hex(nameVal[i+1]) * 16 + hex(nameVal[i+2]));
+          i += 2;
+        } else {
+          dec[j++] = nameVal[i];
+        }
+      }
+      dec[j] = '\0';
+      strncpy(httpCommandName, dec, sizeof(httpCommandName) - 1);
       httpCommandName[sizeof(httpCommandName) - 1] = '\0';
     } else {
       httpCommandName[0] = '\0';
@@ -625,7 +731,7 @@ void startServer() {
   cfg.lru_purge_enable = true;
   cfg.recv_wait_timeout = 10;   // segundos: nao derruba conexao lenta no meio
   cfg.send_wait_timeout = 10;   // idem no envio da pagina grande
-  
+  cfg.core_id = 0;  
 
   if (httpd_start(&g_server, &cfg) != ESP_OK) {
     Serial.println("ERRO: httpd porta 80 falhou");
@@ -646,6 +752,9 @@ void startServer() {
   cfg2.max_uri_handlers = 2;
   cfg2.stack_size = 8192;
   cfg2.lru_purge_enable = true;
+  cfg2.core_id = 0;              // <-- NOVA
+  cfg2.recv_wait_timeout = 10;   // <-- NOVA
+  cfg2.send_wait_timeout = 10;   // <-- NOVA
 
   if (httpd_start(&g_stream, &cfg2) != ESP_OK) {
     Serial.println("ERRO: httpd porta 81 falhou");
@@ -752,6 +861,7 @@ void setup() {
 
   // --- Buffer do stream + rede ---
   g_mutex = xSemaphoreCreateMutex();
+  g_infoMutex = xSemaphoreCreateMutex();
   g_jpg = (uint8_t *)ps_malloc(JPG_CAP); // PSRAM: 40KB nao cabe na RAM interna
   if (!g_jpg) {
     Serial.println("ERRO: ps_malloc falhou. PSRAM habilitada? (OPI PSRAM)");
@@ -760,6 +870,8 @@ void setup() {
   }
 
   WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);   // <-- LINHA NOVA
+  WiFi.persistent(true);
   WiFi.setSleep(
       false); // desliga o power save do WiFi: latencia estavel no stream
   WiFi.begin(WIFI_SSID, WIFI_PASS);
@@ -807,101 +919,42 @@ void setup() {
   Serial.println("SWITCH GPIO14: fechado = dorme | aberto = acorda");
   Serial.println("LDR    GPIO2  | COB/MOSFET GPIO42 | LED verde GPIO48");
   Serial.println();
+
+  xTaskCreatePinnedToCore(tarefaLED,    "led",     2048, NULL, 3, &handleLED,    1);
+xTaskCreatePinnedToCore(tarefaCamera, "camera", 10240, NULL, 1, &handleCamera, 1);
 }
 
 // ==================== LOOP ====================
 void loop() {
 
-  // Switch fechado (LOW) = dormir. O segundo digitalRead apos 50ms e o
-  // debounce: filtra o repique mecanico do contato.
-  if (digitalRead(pinoDeepSleep) == LOW) {
-    delay(50);
-    if (digitalRead(pinoDeepSleep) == LOW)
-      entrarEmDeepSleep(); // nao retorna
-  }
-
-  // Comandos da web.
-  if (httpCommand != 0) {
-    char cmd = httpCommand;
-    httpCommand = 0;
-    if (cmd == 'c') {
-      modoContinuo = false;
-      doEnroll(httpCommandName[0] != '\0' ? String(httpCommandName) : ALVO_NOME);
-    } else if (cmd == 'm') {
-      modoContinuo = false;
-      enrollMultiplo(6, httpCommandName[0] != '\0' ? String(httpCommandName) : "");
-    } else if (cmd == 'r') {
-      modoContinuo = true;
-      Serial.println(">> MODO CONTINUO (Web)");
-    } else if (cmd == 'p') {
-      modoContinuo = false;
-      Serial.println(">> PAUSADO (Web)");
-    } else if (cmd == 't') {
-      runTentativa();
+  static uint32_t lastWifiCheck = 0;
+  if (millis() - lastWifiCheck > 5000) {
+    lastWifiCheck = millis();
+    if (WiFi.status() != WL_CONNECTED) {
+      Serial.println(">> WiFi caiu, reconectando...");
+      WiFi.disconnect();
+      WiFi.begin(WIFI_SSID, WIFI_PASS);
     }
   }
+  // switch -> deep sleep (com debounce)
+  if (digitalRead(pinoDeepSleep) == LOW) {
+    delay(50);
+    if (digitalRead(pinoDeepSleep) == LOW) entrarEmDeepSleep();
+  }
 
-  // Comandos do monitor serial.
+  // serial -> vira comando no mesmo canal do web
   if (Serial.available()) {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim();
-
-    if (cmd.startsWith("c")) {
-      modoContinuo = false;
-      doEnroll();
-    } else if (cmd.startsWith("r")) {
-      modoContinuo = true;
-      Serial.println(">> MODO CONTINUO");
-    } else if (cmd.startsWith("p")) {
-      modoContinuo = false;
-      Serial.println(">> PAUSADO (feed ativo)");
-    } else if (cmd.startsWith("d")) {
-      recognition.dump();
-    } else if (cmd.startsWith("z")) {
-      sharpMax = 0;
-      Serial.println(">> pico zerado");
-    } else if (cmd.startsWith("t")) {
-      runTentativa();
-    } else if (cmd.startsWith("m")) {
-      modoContinuo = false;
-      enrollMultiplo(6);
-    } else if (cmd.startsWith("l")) {
-      modoContinuo = false;
-      testeLuz();
-    } else if (cmd.startsWith("s")) {
-      entrarEmDeepSleep();
-    }
+    if (cmd.startsWith("s")) entrarEmDeepSleep();          // sono e imediato
+    else if (cmd.length() > 0) { httpCommand = cmd[0]; httpCommandName[0] = '\0'; }
   }
 
-  // Botao: dispara UMA vez por aperto, por deteccao de BORDA DE DESCIDA.
-  // Sem isso, segurar o botao dispararia tentativas em sequencia.
-  // 'static' faz a variavel sobreviver entre chamadas do loop().
+  // botao -> pedido (borda de descida)
   static bool botaoUltimoEstado = HIGH;
   bool botaoAtual = digitalRead(iniciarReconhecimento);
-
-  if (botaoUltimoEstado == HIGH && botaoAtual == LOW) {
-    runTentativa();
-  }
+  if (botaoUltimoEstado == HIGH && botaoAtual == LOW) pedidoReconhecimento = true;
   botaoUltimoEstado = botaoAtual;
-
-  // Captura + publica SEMPRE, mesmo pausado: o feed precisa ficar vivo
-  // pra voce conseguir focar a lente olhando o navegador.
-  if (!camera.capture().isOk()) {
-    delay(100);
-    return;
-  }
-
-  publishFrame(camera.frame->buf, camera.frame->len);
-
-  // Pico de nitidez: gire a lente devagar buscando MAXIMIZAR este valor.
-  uint32_t sharp = camera.frame->len;
-  if (sharp > sharpMax)
-    sharpMax = sharp;
-
-  if (modoContinuo)
-    runRecognition();
-  else
-    updateGInfo(0, sharp, sharpMax, lerLDR(), "(pausado)", "-");
 
   delay(10);
 }
@@ -980,7 +1033,7 @@ void doEnroll(String defaultName) {
   // gerado de rosto borrado contamina TODAS as comparacoes futuras.
   const char *motivo = "";
   if (!frameOk(motivo)) {
-    Serial.printf("ERRO: frame ruim para cadastro (%s). Tente de novo.\n",
+    Serial.printf("ERROR: Poor-quality frame for enrollment (%s). Please try again.\n",
                   motivo);
     analogWrite(pinoLuz, 0);
     return;
@@ -1016,20 +1069,22 @@ void enrollMultiplo(int alvo, String defaultName) {
     nome = prompt("Nome para cadastro multiplo:");
   }
 
-  Serial.printf(">> Multi-enroll de '%s' (meta: %d capturas boas)\n",
+  Serial.printf(">> >> Multi-enrollment for '%s' (target: %d good captures)\n",
                 nome.c_str(), alvo);
   int ok = 0;
   int tentativas = 0;
-  const int MAX_TENTATIVAS = alvo * 8; // teto folgado: o gate rejeita bastante
+  const int MAX_TENTATIVAS = alvo * 2;
   const char *motivo = "";
 
-  analogWrite(pinoLuz, dutyLuz); // acende no duty aprendido
+  estadoLED = LED_RESPIRANDO;     // <-- a task do LED assume o azul
+  analogWrite(pinoLuz, dutyLuz);
 
-while (ok < alvo) {
+  while (ok < alvo) {
     if (tentativas >= MAX_TENTATIVAS) {
       String msg = String("Failed: only ") + ok + "/" + alvo + " saved after " + tentativas + " attempts";
       Serial.println(">> " + msg);
       updateEnrollStatus("failed", msg.c_str());
+      estadoLED = LED_OFF;         // <-- desliga
       analogWrite(pinoAzul, 0);
       analogWrite(pinoLuz, 0);
       return;
@@ -1040,43 +1095,38 @@ while (ok < alvo) {
     Serial.println("   " + msg);
     updateEnrollStatus("capturing", msg.c_str());
 
-    // ~2 s between captures, keeping the watchdog, LED, and control loop running.
-    for (int k = 0; k < 20; k++) {
+    // ~2s entre capturas. Sem pulsaLEDEspera: a task do LED ja respira o azul.
+    for (int k = 0; k < 12; k++) {
       if (camera.capture().isOk()) {
         publishFrame(camera.frame->buf, camera.frame->len);
       }
       ajustaLuz();
-      // Em vez de delay(100) seco, laco de 100ms pulsando o LED.
-      unsigned long tEspera = millis();
-      while (millis() - tEspera < 100) {
-        pulsaLEDEspera();
-        delay(5);
-      }
+      delay(100);
     }
 
     if (!camera.capture().isOk()) {
-      Serial.println("   captura falhou, repetindo");
-      updateEnrollStatus("capturing", "captura falhou, repetindo");
+      Serial.println("   Capture failed, retrying");
+      updateEnrollStatus("capturing", "Capture failed, retrying");
       continue;
     }
     publishFrame(camera.frame->buf, camera.frame->len);
 
     if (!frameOk(motivo)) {
-      String msg = String("descartei (") + motivo + "), repetindo";
+      String msg = String("Discarded (") + motivo + "), retrying";
       Serial.println("   " + msg);
       updateEnrollStatus("capturing", msg.c_str());
       continue;
     }
 
     if (!recognition.detect().isOk()) {
-      Serial.println("   sem rosto, repetindo");
-      updateEnrollStatus("capturing", "sem rosto, repetindo");
+      Serial.println("   No face detected, retrying");
+      updateEnrollStatus("capturing", "No face detected, retrying");
       continue;
     }
 
-    if (recognition.enroll(nome).isOk()) {
+      if (recognition.enroll(nome).isOk()) {
       ok++;
-      String msg = String("OK (") + ok + "/" + alvo + " boas)";
+      String msg = String("OK (") + ok + "/" + alvo + " successful)";
       Serial.println("   " + msg);
       updateEnrollStatus("capturing", msg.c_str());
     } else {
@@ -1086,9 +1136,10 @@ while (ok < alvo) {
     }
   }
 
-  String finalMsg = String("Multi-enroll concluido: ") + ok + "/" + alvo + " capturas boas para '" + nome + "'";
+  String finalMsg = String("Multi-enrollment completed: ") + ok + "/" + alvo + " successful captures for '" + nome + "'";
   Serial.println(">> " + finalMsg);
   updateEnrollStatus("success", finalMsg.c_str());
+  estadoLED = LED_OFF;            // <-- desliga
   analogWrite(pinoAzul, 0);
   analogWrite(pinoLuz, 0);
 }
