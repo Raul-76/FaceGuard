@@ -1132,7 +1132,7 @@ body::after {
   <main class="main">
 
     <!-- CONFIG BAR -->
-    <section class="config-bar" id="configBar">
+    <section class="config-bar" id="configBar" style="display:none;">
       <div class="config-inner">
         <div class="config-field">
           <label for="espIpInput">
@@ -1347,7 +1347,10 @@ const state = {
   statusPollInterval: null,
   lastEnrollStatus: 'idle',
   lastEnrollMsg: '-',
-  lastScanning: false
+  lastScanning: false,
+  pollFailCount: 0,
+  enrollActive: false,
+  reconnectInterval: null
 };
 let lastAccessStateStr = "-";
 
@@ -1386,6 +1389,7 @@ function connectToESP() {
 function disconnectFromESP() {
   stopStream();
   clearStatusPoll();
+  if (state.reconnectInterval) { clearInterval(state.reconnectInterval); state.reconnectInterval = null; }
   setConnectedUI(false);
   showToast('Disconnected from ESP32', 'info');
   addLogEntry('info', 'Session ended', `Disconnected from ${state.esp32Ip}`);
@@ -1401,10 +1405,16 @@ function startStream(ip) {
   const overlay = document.getElementById('cameraOverlay');
 
   img.onerror = () => {
-    // Se falhar o stream de imagem pura, tenta reconectar
-    stopStream();
-    setConnectedUI(false);
-    showToast(`Could not connect to stream.\nCheck IP and if ESP32 is online.`, 'error');
+    if (state.connected) {
+      // Já estava conectado e o stream tropeçou: tenta recarregar sozinho
+      console.warn('Stream falhou, recarregando...');
+      setTimeout(() => { img.src = streamUrl + '?t=' + Date.now(); }, 1500);
+    } else {
+      // Nunca chegou a conectar: aí sim é erro de IP/placa offline
+      stopStream();
+      setConnectedUI(false);
+      showToast(`Could not connect to stream.\nCheck IP and if ESP32 is online.`, 'error');
+    }
   };
 
   img.onload = () => {
@@ -1489,21 +1499,57 @@ function clearStatusPoll() {
 
 async function pollStatus(ip) {
   try {
-    const res = await fetch(`http://${ip}/info`, { signal: AbortSignal.timeout(3000) });
+    const timeoutMs = state.enrollActive ? 15000 : 5000;
+    const res = await fetch(`http://${ip}/info`, { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) throw new Error('Not OK');
-    const data = await res.json();
+    const text = await res.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (parseErr) {
+      console.warn('JSON inválido, ignorando este poll', parseErr);
+      return; // frame corrompido: ignora, NÃO desconecta
+    }
+    state.pollFailCount = 0;
     applyStatusToUI(data);
   } catch (e) {
-    console.error("Erro no pollStatus:", e);
-    // If we lose connection
-    if (state.connected) {
-      stopStream();
-      setConnectedUI(false);
-      clearStatusPoll();
-      showToast('Connection to ESP32 lost!', 'error');
-      addLogEntry('denied', 'Connection lost', `ESP32 at ${ip} went offline`);
+    state.pollFailCount = (state.pollFailCount || 0) + 1;
+    // Durante o enroll o ESP fica MUITO ocupado -> tolera bem mais antes de desistir.
+    const limite = state.enrollActive ? 30 : 3;
+    console.warn(`pollStatus falhou (${state.pollFailCount}/${limite})`, e);
+    if (state.pollFailCount >= limite && state.connected) {
+      handleConnectionLost(ip);
     }
   }
+}
+
+/* Perdeu a conexão: para tudo, mas NÃO desiste — começa a tentar voltar. */
+function handleConnectionLost(ip) {
+  clearStatusPoll();
+  stopStream();
+  setConnectedUI(false);
+  showToast('Conexão perdida — tentando reconectar...', 'warning');
+  addLogEntry('denied', 'Connection lost', `ESP32 at ${ip} indisponível`);
+  startReconnectLoop(ip);
+}
+
+/* Fica batendo no /info a cada 3s; quando responder, re-arma o stream. */
+function startReconnectLoop(ip) {
+  if (state.reconnectInterval) return; // já tem um loop rodando
+  state.reconnectInterval = setInterval(async () => {
+    try {
+      const res = await fetch(`http://${ip}/info`, { signal: AbortSignal.timeout(4000) });
+      if (res.ok) {
+        clearInterval(state.reconnectInterval);
+        state.reconnectInterval = null;
+        state.pollFailCount = 0;
+        showToast('ESP32 de volta — reconectando...', 'success');
+        startStream(ip); // religa stream + polling
+      }
+    } catch (_) {
+      // ainda fora: segue tentando no próximo tick
+    }
+  }, 3000);
 }
 
 function applyStatusToUI(data) {
@@ -1538,6 +1584,8 @@ function applyStatusToUI(data) {
     }
     lastAccessStateStr = data.last_acc;
   }
+
+  state.enrollActive = (data.enroll_status === 'capturing');
 
   // Handle enrollment status
   if (data.enroll_status && data.enroll_msg) {
