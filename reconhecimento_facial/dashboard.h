@@ -1,3 +1,4 @@
+//versão completa (login + gerenciamento de faces + cancelar enroll) COM conexão robusta
 #ifndef DASHBOARD_H
 #define DASHBOARD_H
 
@@ -11,6 +12,7 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FaceGuard ESP32 Monitor</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E" />
   <meta name="description"
     content="Real-time monitoring dashboard with live camera and access logs for the ESP32 facial recognition system." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -537,6 +539,9 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
       pointer-events: none;
     }
 
+    /* A barra de scan fica ESCONDIDA por padrao. So aparece quando o
+       overlay recebe a classe "scanning" (ligada via JS durante uma
+       tentativa de reconhecimento, seja pela web ou pelo botao fisico). */
     .scan-line {
       position: absolute;
       left: 0;
@@ -545,6 +550,10 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
       background: linear-gradient(90deg, transparent, var(--accent), transparent);
       animation: scan 3s linear infinite;
       opacity: 0.5;
+      display: none;
+    }
+    .camera-overlay.scanning .scan-line {
+      display: block;
     }
 
     @keyframes scan {
@@ -660,10 +669,13 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
 
     /* ===================== STATS BAR ===================== */
     .stats-bar {
-      display: flex;
+      display: none;
       align-items: center;
       padding: 12px 20px;
       gap: 0;
+    }
+    .stats-bar.visible {
+      display: flex;
     }
 
     .stat-item {
@@ -1401,7 +1413,7 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
 
       <!-- ===== LEFT: CAMERA PANEL ===== -->
       <div class="panel camera-panel">
-        <div class="panel-header">
+       <div class="panel-header">
           <div class="panel-title">
             <div class="panel-icon camera-icon">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1411,8 +1423,13 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
             </div>
             Live Camera
           </div>
-          <div class="live-badge" id="liveBadge">
-            <span class="live-dot"></span> OFFLINE
+          <div style="display:flex; align-items:center; gap:8px;">
+            <button class="icon-btn" id="btnToggleStats" onclick="toggleStats()" title="Show technical details">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </button>
+            <div class="live-badge" id="liveBadge">
+              <span class="live-dot"></span> OFFLINE
+            </div>
           </div>
         </div>
 
@@ -1654,13 +1671,12 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
     /**
      * FaceGuard Dashboard — app.js
      * ESP32 Facial Recognition Monitor
-     * 
+     *
      * ESP32 Endpoints:
-     *   GET  http://{IP}/         → Página padrão
-     *   GET  http://{IP}/status   → Status JSON da câmera
-     *   GET  http://{IP}/control?var=face_detect&val=1  → Controles
-     *   GET  http://{IP}:81/stream → MJPEG stream ao vivo
-     *   GET  http://{IP}/capture   → Foto JPEG
+     *   GET  http://{IP}/         -> Pagina padrao
+     *   GET  http://{IP}/info     -> Status JSON da camera
+     *   GET  http://{IP}/control?cmd=X&name=Y -> Controles
+     *   GET  http://{IP}:81/stream -> MJPEG stream ao vivo
      */
 
     /* ===================== STATE ===================== */
@@ -1675,7 +1691,12 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
       statusPollInterval: null,
       lastEnrollStatus: 'idle',
       lastEnrollMsg: '-',
-      facesList: []
+      facesList: [],
+      lastScanning: false,
+      pollFailCount: 0,
+      enrollActive: false,
+      reconnectInterval: null,
+      enrollGuardTimer: null
     };
     let lastAccessStateStr = "-";
 
@@ -1733,14 +1754,15 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
     function disconnectFromESP() {
       stopStream();
       clearStatusPoll();
+      if (state.reconnectInterval) { clearInterval(state.reconnectInterval); state.reconnectInterval = null; }
       setConnectedUI(false);
       showToast('Disconnected from ESP32', 'info');
       addLogEntry('info', 'Session ended', `Disconnected from ${state.esp32Ip}`);
     }
 
     function startStream(ip) {
-      // O feed de vídeo do ESP32 roda na porta 81, separada da porta 80 (API)
-      const baseIp = ip.split(':')[0]; // Remove qualquer porta caso o usuário tenha digitado
+      // O feed de video do ESP32 roda na porta 81, separada da porta 80 (API)
+      const baseIp = ip.split(':')[0]; // Remove qualquer porta caso o usuario tenha digitado
       const streamUrl = `http://${baseIp}:81/stream`;
 
       const img = document.getElementById('cameraStream');
@@ -1748,10 +1770,16 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
       const overlay = document.getElementById('cameraOverlay');
 
       img.onerror = () => {
-        // Se falhar o stream de imagem pura, tenta reconectar
-        stopStream();
-        setConnectedUI(false);
-        showToast(`Could not connect to stream.\nCheck IP and if ESP32 is online.`, 'error');
+        if (state.connected) {
+          // Ja estava conectado e o stream tropecou: recarrega sozinho
+          console.warn('Stream falhou, recarregando...');
+          setTimeout(() => { img.src = streamUrl + '?t=' + Date.now(); }, 1500);
+        } else {
+          // Nunca chegou a conectar: ai sim e erro de IP/placa offline
+          stopStream();
+          setConnectedUI(false);
+          showToast(`Could not connect to stream.\nCheck IP and if ESP32 is online.`, 'error');
+        }
       };
 
       img.onload = () => {
@@ -1767,7 +1795,7 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
       // Dispara o carregamento do stream
       img.src = streamUrl;
 
-      // Verifica a conexão de status
+      // Verifica a conexao de status
       checkStatusAndConnect(ip, streamUrl);
     }
 
@@ -1779,7 +1807,7 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
           applyStatusToUI(status);
         }
       } catch (e) {
-        // Ignorado pois o img.onerror cuidará se o stream falhar
+        // Ignorado pois o img.onerror cuidara se o stream falhar
       }
     }
 
@@ -1791,6 +1819,7 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
       img.onerror = null; // Previne loop infinito
       img.removeAttribute('src');
       img.style.display = 'none';
+      overlay.classList.remove('scanning');
       overlay.style.display = 'none';
       placeholder.style.display = 'flex';
     }
@@ -1835,21 +1864,57 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
 
     async function pollStatus(ip) {
       try {
-        const res = await fetch(`http://${ip}/info`, { signal: AbortSignal.timeout(3000) });
+        const timeoutMs = state.enrollActive ? 15000 : 5000;
+        const res = await fetch(`http://${ip}/info`, { signal: AbortSignal.timeout(timeoutMs) });
         if (!res.ok) throw new Error('Not OK');
-        const data = await res.json();
+        const text = await res.text();
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch (parseErr) {
+          console.warn('JSON inválido, ignorando este poll', parseErr);
+          return; // frame corrompido: ignora, NÃO desconecta
+        }
+        state.pollFailCount = 0;
         applyStatusToUI(data);
       } catch (e) {
-        console.error("Erro no pollStatus:", e);
-        // If we lose connection
-        if (state.connected) {
-          stopStream();
-          setConnectedUI(false);
-          clearStatusPoll();
-          showToast('Connection to ESP32 lost!', 'error');
-          addLogEntry('denied', 'Connection lost', `ESP32 at ${ip} went offline`);
+        state.pollFailCount = (state.pollFailCount || 0) + 1;
+        // Durante o enroll o ESP fica MUITO ocupado -> tolera bem mais antes de desistir.
+        const limite = state.enrollActive ? 30 : 3;
+        console.warn(`pollStatus falhou (${state.pollFailCount}/${limite})`, e);
+        if (state.pollFailCount >= limite && state.connected) {
+          handleConnectionLost(ip);
         }
       }
+    }
+
+    /* Perdeu a conexão: para tudo, mas NÃO desiste — começa a tentar voltar. */
+    function handleConnectionLost(ip) {
+      clearStatusPoll();
+      stopStream();
+      setConnectedUI(false);
+      showToast('Conexão perdida — tentando reconectar...', 'warning');
+      addLogEntry('denied', 'Connection lost', `ESP32 at ${ip} indisponível`);
+      startReconnectLoop(ip);
+    }
+
+    /* Fica batendo no /info a cada 3s; quando responder, re-arma o stream. */
+    function startReconnectLoop(ip) {
+      if (state.reconnectInterval) return; // já tem um loop rodando
+      state.reconnectInterval = setInterval(async () => {
+        try {
+          const res = await fetch(`http://${ip}/info`, { signal: AbortSignal.timeout(4000) });
+          if (res.ok) {
+            clearInterval(state.reconnectInterval);
+            state.reconnectInterval = null;
+            state.pollFailCount = 0;
+            showToast('ESP32 de volta — reconectando...', 'success');
+            startStream(ip); // religa stream + polling
+          }
+        } catch (_) {
+          // ainda fora: segue tentando no próximo tick
+        }
+      }, 3000);
     }
 
     function applyStatusToUI(data) {
@@ -1860,6 +1925,22 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
       state.isContinuous = (data.name !== "(pausado)");
       updateControlButtons();
 
+      // ---- Barra de scan: liga/desliga com base no campo "scanning" ----
+      // reportado pelo ESP no /info. Isso funciona tanto para o disparo
+      // pela web (botao "Test Access") quanto pelo botao fisico (GPIO21),
+      // porque em ambos os casos o ESP muda esse campo durante a tentativa.
+      if (typeof data.scanning !== 'undefined') {
+        const scanningNow = (data.scanning === true || data.scanning === 1 || data.scanning === "1" || data.scanning === "true");
+        if (scanningNow !== state.lastScanning) {
+          const overlay = document.getElementById('cameraOverlay');
+          if (overlay) {
+            if (scanningNow) overlay.classList.add('scanning');
+            else overlay.classList.remove('scanning');
+          }
+          state.lastScanning = scanningNow;
+        }
+      }
+
       if (data.last_acc && data.last_acc !== lastAccessStateStr) {
         if (data.last_acc === 'granted') {
           registerAccessEvent(true, `Face: ${data.last_name}`);
@@ -1868,6 +1949,18 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
         }
         lastAccessStateStr = data.last_acc;
       }
+
+      // Mantem o modo enroll (polling tolerante) enquanto o ESP estiver capturando.
+      // NAO derruba o flag em estados intermediarios/idle -> so em estados finais,
+      // pra nao voltar ao limite curto no meio de uma captura e derrubar a conexao.
+      if (data.enroll_status === 'capturing') {
+        beginEnrollGuard();               // re-arma tolerancia + trava de 120s
+      } else if (data.enroll_status === 'success' ||
+                 data.enroll_status === 'failed' ||
+                 data.enroll_status === 'cancelled') {
+        endEnrollGuard();                 // cadastro terminou -> volta ao normal
+      }
+      // (se vier 'idle' ou vazio, respeita o flag otimista setado no confirmEnroll)
 
       // Handle enrollment status
       if (data.enroll_status && data.enroll_msg) {
@@ -1934,6 +2027,12 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
       const ok = await sendControl('t');
       if (ok) {
         showToast('Initiating access attempt...', 'info');
+        // Liga a barra de scan otimisticamente; o poll do /info confirma
+        // (ou corrige) o estado real em ate 3s, e desliga sozinha quando
+        // a tentativa terminar (last_acc muda ou scanning volta a false).
+        const overlay = document.getElementById('cameraOverlay');
+        if (overlay) overlay.classList.add('scanning');
+        state.lastScanning = true;
       }
     }
 
@@ -1979,6 +2078,13 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
 
       const ok = await sendControl('m', extraParams);
       if (ok) {
+        // >>> CORRECAO PRINCIPAL <<<
+        // Marca enroll como ATIVO agora mesmo, ANTES da primeira poll do /info.
+        // Sem isto, a primeira ronda de status durante a captura (quando o ESP
+        // esta mais ocupado e nao responde o /info) ainda usava o limite curto
+        // (5s / 3 falhas) e derrubava o dashboard antes de descobrir que era um
+        // cadastro em andamento.
+        beginEnrollGuard();
         showToast(`📸 Multiple enrollment started! Look at the camera. (${nameVal})`, 'warning');
         addLogEntry('info', 'Enrollment started', `Waiting for face... (${nameVal})`);
       }
@@ -1989,6 +2095,25 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
       if (ok) {
         showToast('Cancelling enrollment...', 'info');
       }
+    }
+
+    /* Liga o "modo enroll": polling tolerante (timeout 15s / 30 falhas).
+       Zera falhas acumuladas e arma uma trava de seguranca de 120s, caso o ESP
+       nunca reporte o fim do cadastro. */
+    function beginEnrollGuard() {
+      state.enrollActive = true;
+      state.pollFailCount = 0;
+      if (state.enrollGuardTimer) clearTimeout(state.enrollGuardTimer);
+      state.enrollGuardTimer = setTimeout(() => {
+        state.enrollActive = false;
+        state.enrollGuardTimer = null;
+      }, 120000);
+    }
+
+    /* Desliga o "modo enroll" e cancela a trava de seguranca. */
+    function endEnrollGuard() {
+      state.enrollActive = false;
+      if (state.enrollGuardTimer) { clearTimeout(state.enrollGuardTimer); state.enrollGuardTimer = null; }
     }
 
     /* ===================== FACES MANAGEMENT ===================== */
@@ -2069,13 +2194,13 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
       const checkboxes = document.querySelectorAll('.face-checkbox:checked');
       if (checkboxes.length === 0) return;
       if (!confirm(`Delete ${checkboxes.length} selected face(s)?`)) return;
-      
+
       document.getElementById('facesListLoading').style.display = 'block';
       document.getElementById('facesListContainer').style.display = 'none';
-      
+
       for (const cb of checkboxes) {
         await sendControl('k', `&name=${encodeURIComponent(cb.value)}`);
-        await new Promise(r => setTimeout(r, 600)); 
+        await new Promise(r => setTimeout(r, 600));
       }
       showToast('Selected faces deleted', 'success');
       fetchFaces();
@@ -2086,6 +2211,13 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
       if (btnC) btnC.className = 'ctrl-btn' + (state.isContinuous ? ' active' : '');
     }
 
+    function toggleStats() {
+      const bar = document.getElementById('statsBar');
+      const btn = document.getElementById('btnToggleStats');
+      if (!bar) return;
+      const showing = bar.classList.toggle('visible');
+      if (btn) btn.classList.toggle('active', showing);
+    }
 
 
     /* ===================== MANUAL LOG (for demonstration) ===================== */
