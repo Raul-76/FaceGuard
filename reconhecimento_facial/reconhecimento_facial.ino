@@ -184,11 +184,13 @@ uint32_t sharpMax = 0;     // pico de nitidez ja visto (guia pra focar a lente)
 uint32_t lastPrint = 0;    // throttle do serial no modo continuo
 uint32_t ultimoSharp = 0;  // tamanho do frame anterior (detector de movimento)
 volatile char httpCommand = 0; // comando web atômico ('c', 'r', 'p', 't', 'm')
-char httpCommandName[64] = ""; // nome passado via web (para 'c' e 'm')
+char httpCommandName[64] = ""; // nome passado via web
+char httpNewCommandName[64] = ""; // novo nome para edicao
 String lastAccType = "-";      // "granted", "denied" ou "-"
 String lastAccName = "-";      // nome ou "desconhecido"
 String enrollStatus = "idle";
 String enrollMsg = "-";
+volatile bool cancelarCadastro = false;
 
 
 void tarefaLED(void *pv) {
@@ -210,10 +212,62 @@ void tarefaCamera(void *pv) {
       char cmd = httpCommand;
       httpCommand = 0;
       switch (cmd) {
-        case 'c': modoContinuo = false;
+        case 'c': modoContinuo = false; cancelarCadastro = false;
                   doEnroll(httpCommandName[0] ? String(httpCommandName) : ""); break;
-        case 'm': modoContinuo = false;
+        case 'm': modoContinuo = false; cancelarCadastro = false;
                   enrollMultiplo(5, httpCommandName[0] ? String(httpCommandName) : ""); break;
+        case 'x': cancelarCadastro = true; break;
+        case 'k': {
+            File src = SPIFFS.open("/fr.bin", "rb");
+            File dst = SPIFFS.open("/fr.tmp", "wb");
+            bool found = false;
+            while(src && dst && src.available()) {
+                enrolled_face_t proto;
+                src.read((uint8_t*)&proto, sizeof(proto));
+                if (String(proto.name) == String(httpCommandName)) {
+                    found = true;
+                } else {
+                    dst.write((uint8_t*)&proto, sizeof(proto));
+                }
+            }
+            if(src) src.close();
+            if(dst) dst.close();
+            if (found) {
+                SPIFFS.remove("/fr.bin");
+                SPIFFS.rename("/fr.tmp", "/fr.bin");
+                recognition.begin();
+            } else {
+                SPIFFS.remove("/fr.tmp");
+            }
+            break;
+        }
+        case 'e': {
+            File src = SPIFFS.open("/fr.bin", "rb");
+            File dst = SPIFFS.open("/fr.tmp", "wb");
+            bool found = false;
+            while(src && dst && src.available()) {
+                enrolled_face_t proto;
+                src.read((uint8_t*)&proto, sizeof(proto));
+                if (String(proto.name) == String(httpCommandName)) {
+                    found = true;
+                    String newName = String(httpNewCommandName);
+                    for (uint8_t i = 0; i < newName.length() && i < 16; i++)
+                        proto.name[i] = newName[i];
+                    proto.name[newName.length() < 16 ? newName.length() : 16] = '\0';
+                }
+                dst.write((uint8_t*)&proto, sizeof(proto));
+            }
+            if(src) src.close();
+            if(dst) dst.close();
+            if (found) {
+                SPIFFS.remove("/fr.bin");
+                SPIFFS.rename("/fr.tmp", "/fr.bin");
+                recognition.begin();
+            } else {
+                SPIFFS.remove("/fr.tmp");
+            }
+            break;
+        }
         case 'r': modoContinuo = true;  Serial.println(">> MODO CONTINUO"); break;
         case 'p': modoContinuo = false; Serial.println(">> PAUSADO"); break;
         case 't': pedidoReconhecimento = true; break;
@@ -614,6 +668,25 @@ static esp_err_t infoHandler(httpd_req_t *req) {
   return httpd_resp_send(req, local, HTTPD_RESP_USE_STRLEN);
 }
 
+static esp_err_t facesHandler(httpd_req_t *req) {
+  String json = "[";
+  File file = SPIFFS.open("/fr.bin", "rb");
+  bool first = true;
+  while(file && file.available()) {
+    enrolled_face_t proto;
+    file.read((uint8_t*)&proto, sizeof(proto));
+    if (proto.ctrl[0] != 0x14 || proto.ctrl[1] != 0x08) break; // Parse error
+    if (!first) json += ",";
+    json += "\"" + String(proto.name) + "\"";
+    first = false;
+  }
+  if(file) file.close();
+  json += "]";
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  return httpd_resp_send(req, json.c_str(), json.length());
+}
+
 static esp_err_t controlHandler(httpd_req_t *req) {
   char buf[128];
   if (httpd_req_get_url_query_str(req, buf, sizeof(buf)) == ESP_OK) {
@@ -646,6 +719,30 @@ static esp_err_t controlHandler(httpd_req_t *req) {
       httpCommandName[sizeof(httpCommandName) - 1] = '\0';
     } else {
       httpCommandName[0] = '\0';
+    }
+    char newNameVal[64];
+    if (httpd_query_key_value(buf, "newname", newNameVal, sizeof(newNameVal)) == ESP_OK) {
+      char dec[64]; int j = 0;
+      for (int i = 0; newNameVal[i] && j < (int)sizeof(dec) - 1; i++) {
+        if (newNameVal[i] == '+') dec[j++] = ' ';
+        else if (newNameVal[i] == '%' && newNameVal[i+1] && newNameVal[i+2]) {
+          auto hex = [](char c) -> int {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+            if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+            return 0;
+          };
+          dec[j++] = (char)(hex(newNameVal[i+1]) * 16 + hex(newNameVal[i+2]));
+          i += 2;
+        } else {
+          dec[j++] = newNameVal[i];
+        }
+      }
+      dec[j] = '\0';
+      strncpy(httpNewCommandName, dec, sizeof(httpNewCommandName) - 1);
+      httpNewCommandName[sizeof(httpNewCommandName) - 1] = '\0';
+    } else {
+      httpNewCommandName[0] = '\0';
     }
   }
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
@@ -743,9 +840,11 @@ void startServer() {
   httpd_uri_t u1 = {"/", HTTP_GET, indexHandler, nullptr};
   httpd_uri_t u3 = {"/info", HTTP_GET, infoHandler, nullptr};
   httpd_uri_t u4 = {"/control", HTTP_GET, controlHandler, nullptr};
+  httpd_uri_t u5 = {"/faces", HTTP_GET, facesHandler, nullptr};
   httpd_register_uri_handler(g_server, &u1);
   httpd_register_uri_handler(g_server, &u3);
   httpd_register_uri_handler(g_server, &u4);
+  httpd_register_uri_handler(g_server, &u5);
 
   // Porta 81: SO o stream MJPEG
   httpd_config_t cfg2 = HTTPD_DEFAULT_CONFIG();
@@ -1091,6 +1190,15 @@ void enrollMultiplo(int alvo, String defaultName) {
   analogWrite(pinoLuz, dutyLuz);
 
   while (ok < alvo) {
+    if (cancelarCadastro) {
+      String msg = String("Enrollment cancelled.");
+      Serial.println(">> " + msg);
+      updateEnrollStatus("cancelled", msg.c_str());
+      estadoLED = LED_OFF;
+      analogWrite(pinoAzul, 0);
+      analogWrite(pinoLuz, 0);
+      return;
+    }
     if (tentativas >= MAX_TENTATIVAS) {
       String msg = String("Failed: only ") + ok + "/" + alvo + " saved after " + tentativas + " attempts";
       Serial.println(">> " + msg);
