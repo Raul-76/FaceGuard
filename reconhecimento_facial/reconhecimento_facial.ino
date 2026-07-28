@@ -22,6 +22,8 @@
 #include <esp_http_server.h> // servidor HTTP nativo do IDF (mais leve que WebServer.h)
 #include <math.h>            // sin() do pulso do LED
 
+#include <ESP32Servo.h>
+
 #include <ESPmDNS.h>
 
 #include "dashboard.h"
@@ -74,6 +76,13 @@ const int iniciarReconhecimento = 21;
 // Switch de trava do deep sleep. TEM que ser RTC GPIO (0..21 no S3):
 // so o dominio RTC fica vivo dormindo, entao so esses pinos acordam.
 const gpio_num_t pinoDeepSleep = GPIO_NUM_14;
+
+// ==================== SERVO DA FECHADURA ====================
+Servo fechaduraServo;
+const int pinoServo = 40;          // GPIO40 livre no projeto
+const int SERVO_FECHADO = 0;       // trancado
+const int SERVO_ABERTO  = 90;      // destrancado
+const uint32_t TEMPO_ABERTO_MS = 7000; // tempo que fica aberta antes de fechar
 
 // ==================== BUZZER ====================
 // Cada som e um vetor de pares {frequencia_Hz, duracao_ms}, terminado
@@ -393,6 +402,7 @@ void entrarEmDeepSleep() {
   Serial.println(">> Entrando em DEEP SLEEP (abra o switch para acordar)");
   Serial.flush(); // sem isso o chip dorme antes da UART terminar de enviar
 
+  fechaduraServo.write(SERVO_FECHADO);  // garante que dorme trancada
   digitalWrite(pinoVermelho, LOW);
   digitalWrite(pinoVerde, LOW);
   analogWrite(pinoAzul, 0);    // mata o PWM residual do pulsaLEDEspera
@@ -421,18 +431,27 @@ void entrarEmDeepSleep() {
  * chamada em TODAS as cinco saidas da tentativa.
  */
 void sinalizaResultado(int pino, const Nota melodia[]) {
-  estadoLED = LED_OFF;                    // <-- para a task de respirar
+  estadoLED = LED_OFF;
+  if (handleLED) vTaskSuspend(handleLED);   // <-- para o analogWrite continuo
   analogWrite(pinoAzul, 0);
   digitalWrite(pinoAzul, LOW);
   analogWrite(pinoLuz, 0);
   digitalWrite(pino, HIGH);
   tocarMelodia(melodia);
-  uint32_t t0 = millis();                 // <-- mantem o feed durante o hold
-  while (millis() - t0 < 2500) {
+
+  bool aprovado = (pino == pinoVerde);
+  if (aprovado) fechaduraServo.write(SERVO_ABERTO);
+
+  uint32_t t0 = millis();
+  uint32_t hold = aprovado ? TEMPO_ABERTO_MS : 2500;
+  while (millis() - t0 < hold) {
     if (camera.capture().isOk()) publishFrame(camera.frame->buf, camera.frame->len);
     delay(20);
   }
+
+  if (aprovado) fechaduraServo.write(SERVO_FECHADO);
   digitalWrite(pino, LOW);
+  if (handleLED) vTaskResume(handleLED);    // <-- devolve o azul
 }
 
 /**
@@ -919,6 +938,13 @@ void setup() {
 
   Serial.println("Camera OK / Recognizer OK");
 
+  ESP32PWM::allocateTimer(1);
+  ESP32PWM::allocateTimer(2);
+  ESP32PWM::allocateTimer(3);
+  fechaduraServo.setPeriodHertz(50);             // servo padrao = 50Hz
+  fechaduraServo.attach(pinoServo, 500, 2400);   // faixa de pulso em us
+  fechaduraServo.write(SERVO_FECHADO);      // nasce trancada e assim fica no boot
+
   // --- Ajuste do SENSOR (obrigatoriamente DEPOIS do begin) ---
   // Este e o UNICO ponto onde da pra "normalizar a imagem": a lib roda a
   // inferencia sobre o frame interno, e o buffer que temos e JPEG
@@ -1008,7 +1034,7 @@ void setup() {
   // Critico: com o prompt() bloqueante o setup travava aqui esperando o
   // monitor serial, e o loop() -- que le o switch e o botao -- nunca rodava.
   // Padrao seguro: so apaga com um "s" deliberado.
-  if (promptTimeout("Apagar cadastros? [s|n] (8s)", 8000).startsWith("s")) {
+  if (promptTimeout("Apagar cadastros? [s|n] (8s)", 10).startsWith("s")) {
     recognition.deleteAll();
     Serial.println("Apagado.");
   }
@@ -1031,7 +1057,7 @@ void setup() {
   Serial.println();
 
   xTaskCreatePinnedToCore(tarefaLED,    "led",     2048, NULL, 3, &handleLED,    1);
-xTaskCreatePinnedToCore(tarefaCamera, "camera", 10240, NULL, 1, &handleCamera, 1);
+xTaskCreatePinnedToCore(tarefaCamera, "camera", 16384, NULL, 1, &handleCamera, 1);
 }
 
 // ==================== LOOP ====================
