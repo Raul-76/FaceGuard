@@ -1,40 +1,61 @@
 /**
- * FaceGuard Dashboard — app.js
- * ESP32 Facial Recognition Monitor
- * 
- * ESP32 Endpoints:
- *   GET  http://{IP}/         → Página padrão
- *   GET  http://{IP}/status   → Status JSON da câmera
- *   GET  http://{IP}/control?var=face_detect&val=1  → Controles
- *   GET  http://{IP}:81/stream → MJPEG stream ao vivo
- *   GET  http://{IP}/capture   → Foto JPEG
- */
+     * FaceGuard Dashboard — app.js
+     * ESP32 Facial Recognition Monitor
+     *
+     * ESP32 Endpoints:
+     *   GET  http://{IP}/         -> Pagina padrao
+     *   GET  http://{IP}/info     -> Status JSON da camera
+     *   GET  http://{IP}/control?cmd=X&name=Y -> Controles
+     *   GET  http://{IP}:81/stream -> MJPEG stream ao vivo
+     */
 
 /* ===================== STATE ===================== */
 const state = {
   esp32Ip: localStorage.getItem('esp32ip') || (window.location.protocol.startsWith('http') ? window.location.host : ''),
   connected: false,
   isContinuous: false,
-  isSimulation: false,
-  simVideoSource: 'canvas', // 'canvas' | 'webcam'
-  simWebcamStream: null,
-  simCanvasAnimId: null,
-  simTelemetryInterval: null,
   logEntries: JSON.parse(localStorage.getItem('faceLogs') || '[]'),
   currentFilter: 'all',
   totalGranted: 0,
   totalDenied: 0,
   statusPollInterval: null,
   lastEnrollStatus: 'idle',
-  lastEnrollMsg: '-'
+  lastEnrollMsg: '-',
+  facesList: [],
+  lastScanning: false,
+  pollFailCount: 0,
+  enrollActive: false,
+  reconnectInterval: null,
+  enrollGuardTimer: null,
+  pollInFlight: false
 };
 let lastAccessStateStr = "-";
 
+function checkLogin() {
+  const user = document.getElementById('loginUsername').value.trim();
+  const pwd = document.getElementById('loginPassword').value;
+  const errorMsg = document.getElementById('loginErrorMsg');
+  if (user === 'admin' && pwd === 'admin123') {
+    sessionStorage.setItem('faceGuardLoggedIn', 'true');
+    errorMsg.style.display = 'none';
+    document.getElementById('loginOverlay').style.opacity = '0';
+    setTimeout(() => document.getElementById('loginOverlay').style.display = 'none', 500);
+  } else {
+    errorMsg.style.display = 'block';
+    showToast('Invalid login or password', 'error');
+  }
+}
+
 /* ===================== INIT ===================== */
 window.addEventListener('DOMContentLoaded', () => {
+  if (sessionStorage.getItem('faceGuardLoggedIn') !== 'true') {
+    document.getElementById('loginOverlay').style.display = 'flex';
+  } else {
+    document.getElementById('loginOverlay').style.display = 'none';
+  }
+
   const savedIp = state.esp32Ip;
   if (savedIp) {
-    document.getElementById('espIpInput').value = savedIp;
     setTimeout(connectToESP, 100);
   }
 
@@ -46,10 +67,9 @@ window.addEventListener('DOMContentLoaded', () => {
 
 /* ===================== CONNECTION ===================== */
 function connectToESP() {
-  const rawIp = document.getElementById('espIpInput').value.trim();
+  const rawIp = state.esp32Ip;
   if (!rawIp) {
-    showToast('Enter the ESP32 IP!', 'warning');
-    document.getElementById('espIpInput').focus();
+    showToast('IP not configured', 'warning');
     return;
   }
 
@@ -65,25 +85,41 @@ function connectToESP() {
 function disconnectFromESP() {
   stopStream();
   clearStatusPoll();
+  if (state.reconnectInterval) { clearInterval(state.reconnectInterval); state.reconnectInterval = null; }
   setConnectedUI(false);
   showToast('Disconnected from ESP32', 'info');
   addLogEntry('info', 'Session ended', `Disconnected from ${state.esp32Ip}`);
 }
 
 function startStream(ip) {
-  // Se o usuário digitou uma porta no IP (ex: localhost:3000), usa ela. 
-  // Senão, usa a rota padrão /stream
-  const streamUrl = `http://${ip}/stream`;
+  // O feed de video do ESP32 roda na porta 81, separada da porta 80 (API)
+  const baseIp = ip.split(':')[0]; // Remove qualquer porta caso o usuario tenha digitado
+  const streamUrl = `http://${baseIp}:81/stream`;
 
   const img = document.getElementById('cameraStream');
   const placeholder = document.getElementById('cameraPlaceholder');
   const overlay = document.getElementById('cameraOverlay');
 
   img.onerror = () => {
-    // Se falhar o stream de imagem pura, tenta reconectar
-    stopStream();
-    setConnectedUI(false);
-    showToast(`Could not connect to stream.\nCheck IP and if ESP32 is online.`, 'error');
+    if (state.connected) {
+      // Durante o cadastro o ESP fica preso na inferencia (detect/enroll) e
+      // para de publicar frame por varios segundos. O navegador acha que o
+      // stream morreu e dispara este onerror -> mas NAO e queda real, e so
+      // o feed pausado. Recarregar rapido (1.5s) atropela o ESP ocupado e
+      // pode derrubar o dashboard. Entao: durante o enroll, espera bem mais
+      // antes de tentar recarregar, dando tempo do ESP terminar a captura.
+      const espera = state.enrollActive ? 5000 : 8000;
+      state.streamRetries = (state.streamRetries || 0) + 1;
+      console.warn(`Stream pausou (retry ${state.streamRetries}), recarregando em ${espera}ms`);
+      setTimeout(() => {
+        // so recarrega se ainda estiver conectado (evita recarregar depois de sair)
+        if (state.connected) img.src = streamUrl + '?t=' + Date.now();
+      }, espera);
+    } else {
+      stopStream();
+      setConnectedUI(false);
+      showToast(`Could not connect to stream.\nCheck IP and if ESP32 is online.`, 'error');
+    }
   };
 
   img.onload = () => {
@@ -99,7 +135,7 @@ function startStream(ip) {
   // Dispara o carregamento do stream
   img.src = streamUrl;
 
-  // Verifica a conexão de status
+  // Verifica a conexao de status
   checkStatusAndConnect(ip, streamUrl);
 }
 
@@ -111,7 +147,7 @@ async function checkStatusAndConnect(ip, streamUrl) {
       applyStatusToUI(status);
     }
   } catch (e) {
-    // Ignorado pois o img.onerror cuidará se o stream falhar
+    // Ignorado pois o img.onerror cuidara se o stream falhar
   }
 }
 
@@ -123,6 +159,7 @@ function stopStream() {
   img.onerror = null; // Previne loop infinito
   img.removeAttribute('src');
   img.style.display = 'none';
+  overlay.classList.remove('scanning');
   overlay.style.display = 'none';
   placeholder.style.display = 'flex';
 }
@@ -166,22 +203,62 @@ function clearStatusPoll() {
 }
 
 async function pollStatus(ip) {
+  if (state.pollInFlight) return;        // nunca empilha /info -> nao esgota sockets do ESP
+  state.pollInFlight = true;
   try {
-    const res = await fetch(`http://${ip}/info`, { signal: AbortSignal.timeout(3000) });
+    const timeoutMs = state.enrollActive ? 15000 : 10000;
+    const res = await fetch(`http://${ip}/info`, { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) throw new Error('Not OK');
-    const data = await res.json();
+    const text = await res.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (parseErr) {
+      console.warn('JSON invalido, ignorando este poll', parseErr);
+      return;
+    }
+    state.pollFailCount = 0;
     applyStatusToUI(data);
   } catch (e) {
-    console.error("Erro no pollStatus:", e);
-    // If we lose connection
-    if (state.connected) {
-      stopStream();
-      setConnectedUI(false);
-      clearStatusPoll();
-      showToast('Connection to ESP32 lost!', 'error');
-      addLogEntry('denied', 'Connection lost', `ESP32 at ${ip} went offline`);
-    }
+    // MUDANCA CRITICA: falha de /info NAO derruba mais a conexao.
+    // O stream MJPEG (porta 81) e a fonte de verdade. Um /info lento
+    // porque o ESP esta ocupado no enroll nao pode matar o feed. Se o
+    // ESP morrer DE VERDADE, o proprio <img> do stream dispara onerror
+    // e tenta recarregar sozinho.
+    state.pollFailCount = (state.pollFailCount || 0) + 1;
+    console.warn(`pollStatus falhou (${state.pollFailCount}) - mantendo stream vivo`, e);
+  } finally {
+    state.pollInFlight = false;
   }
+}
+
+/* Perdeu a conexão: para tudo, mas NÃO desiste — começa a tentar voltar. */
+function handleConnectionLost(ip) {
+  clearStatusPoll();
+  stopStream();
+  setConnectedUI(false);
+  showToast('Conexão perdida — tentando reconectar...', 'warning');
+  addLogEntry('denied', 'Connection lost', `ESP32 at ${ip} indisponível`);
+  startReconnectLoop(ip);
+}
+
+/* Fica batendo no /info a cada 3s; quando responder, re-arma o stream. */
+function startReconnectLoop(ip) {
+  if (state.reconnectInterval) return; // já tem um loop rodando
+  state.reconnectInterval = setInterval(async () => {
+    try {
+      const res = await fetch(`http://${ip}/info`, { signal: AbortSignal.timeout(4000) });
+      if (res.ok) {
+        clearInterval(state.reconnectInterval);
+        state.reconnectInterval = null;
+        state.pollFailCount = 0;
+        showToast('ESP32 de volta — reconectando...', 'success');
+        startStream(ip); // religa stream + polling
+      }
+    } catch (_) {
+      // ainda fora: segue tentando no próximo tick
+    }
+  }, 3000);
 }
 
 function applyStatusToUI(data) {
@@ -192,6 +269,22 @@ function applyStatusToUI(data) {
   state.isContinuous = (data.name !== "(pausado)");
   updateControlButtons();
 
+  // ---- Barra de scan: liga/desliga com base no campo "scanning" ----
+  // reportado pelo ESP no /info. Isso funciona tanto para o disparo
+  // pela web (botao "Test Access") quanto pelo botao fisico (GPIO21),
+  // porque em ambos os casos o ESP muda esse campo durante a tentativa.
+  if (typeof data.scanning !== 'undefined') {
+    const scanningNow = (data.scanning === true || data.scanning === 1 || data.scanning === "1" || data.scanning === "true");
+    if (scanningNow !== state.lastScanning) {
+      const overlay = document.getElementById('cameraOverlay');
+      if (overlay) {
+        if (scanningNow) overlay.classList.add('scanning');
+        else overlay.classList.remove('scanning');
+      }
+      state.lastScanning = scanningNow;
+    }
+  }
+
   if (data.last_acc && data.last_acc !== lastAccessStateStr) {
     if (data.last_acc === 'granted') {
       registerAccessEvent(true, `Face: ${data.last_name}`);
@@ -201,281 +294,53 @@ function applyStatusToUI(data) {
     lastAccessStateStr = data.last_acc;
   }
 
+  // Mantem o modo enroll (polling tolerante) enquanto o ESP estiver capturando.
+  // CORRECAO: so encerra o guard na TRANSICAO para um estado final. Sem isto,
+  // o "success" que sobra do cadastro ANTERIOR (o ESP nunca volta pra "idle")
+  // chegava numa poll logo apos o confirmEnroll e chamava endEnrollGuard(),
+  // desarmando a tolerancia no comeco do 2o cadastro -> desconexao.
+  const enrollStatusChanged = (data.enroll_status !== state.lastEnrollStatus);
+  if (data.enroll_status === 'capturing') {
+    beginEnrollGuard();               // re-arma tolerancia enquanto captura
+  } else if (enrollStatusChanged &&
+    (data.enroll_status === 'success' ||
+      data.enroll_status === 'failed' ||
+      data.enroll_status === 'cancelled')) {
+    endEnrollGuard();                 // so no MOMENTO em que terminou
+  }
+  // "success"/"idle" repetido (estado de repouso) NAO desarma mais o guard.
+  // (se vier 'idle' ou vazio, respeita o flag otimista setado no confirmEnroll)
+
   // Handle enrollment status
   if (data.enroll_status && data.enroll_msg) {
-    if (data.enroll_status === 'capturing' && data.enroll_msg !== state.lastEnrollMsg) {
-      addLogEntry('info', 'Enrollment Progress', data.enroll_msg);
-    } else if (data.enroll_status === 'success' && state.lastEnrollStatus !== 'success') {
-      showToast(`Enrollment Successful: ${data.enroll_msg}`, 'success');
-      addLogEntry('granted', 'Enrollment Completed', data.enroll_msg);
-    } else if (data.enroll_status === 'failed' && state.lastEnrollStatus !== 'failed') {
-      showToast(`Enrollment Failed: ${data.enroll_msg}`, 'error');
-      addLogEntry('denied', 'Enrollment Failed', data.enroll_msg);
+    if (data.enroll_status === 'capturing') {
+      document.getElementById('btnCancelEnroll').style.display = 'inline-flex';
+      document.getElementById('btnOpenEnrollModal').disabled = true;
+      document.getElementById('btnOpenEnrollModal').style.opacity = '0.5';
+      if (data.enroll_msg !== state.lastEnrollMsg) {
+        addLogEntry('info', 'Enrollment Progress', data.enroll_msg);
+      }
+    } else {
+      document.getElementById('btnCancelEnroll').style.display = 'none';
+      document.getElementById('btnOpenEnrollModal').disabled = false;
+      document.getElementById('btnOpenEnrollModal').style.opacity = '1';
+      if (data.enroll_status === 'success' && state.lastEnrollStatus !== 'success') {
+        showToast(`Enrollment Successful: ${data.enroll_msg}`, 'success');
+        addLogEntry('granted', 'Enrollment Completed', data.enroll_msg);
+      } else if (data.enroll_status === 'failed' && state.lastEnrollStatus !== 'failed') {
+        showToast(`Enrollment Failed: ${data.enroll_msg}`, 'error');
+        addLogEntry('denied', 'Enrollment Failed', data.enroll_msg);
+      } else if (data.enroll_status === 'cancelled' && state.lastEnrollStatus !== 'cancelled') {
+        showToast(`Enrollment Cancelled`, 'warning');
+        addLogEntry('info', 'Enrollment Cancelled', data.enroll_msg);
+      }
     }
     state.lastEnrollStatus = data.enroll_status;
     state.lastEnrollMsg = data.enroll_msg;
   }
 }
 
-/* ===================== SIMULATION MODE ===================== */
-function toggleSimulationMode() {
-  if (state.isSimulation) {
-    stopSimulation();
-    showToast('Simulation Mode disabled', 'info');
-  } else {
-    if (state.connected) disconnectFromESP();
-    startSimulation();
-    showToast('Simulation Mode Enabled! Testing without ESP32.', 'success');
-  }
-}
 
-function startSimulation() {
-  state.isSimulation = true;
-  state.connected = true;
-
-  const btnSim = document.getElementById('btnSim');
-  if (btnSim) btnSim.classList.add('active');
-
-  const dot = document.getElementById('statusDot');
-  const label = document.getElementById('statusLabel');
-  const liveBadge = document.getElementById('liveBadge');
-  const btnConnect = document.getElementById('btnConnect');
-  const btnDisconnect = document.getElementById('btnDisconnect');
-  const simPanel = document.getElementById('simPanel');
-  const placeholder = document.getElementById('cameraPlaceholder');
-  const overlay = document.getElementById('cameraOverlay');
-  const simBadge = document.getElementById('simOverlayBadge');
-
-  dot.className = 'status-dot connected';
-  label.textContent = 'Connected (Offline Simulation)';
-  liveBadge.className = 'live-badge live';
-  liveBadge.innerHTML = '<span class="live-dot"></span> SIMULATION';
-  btnConnect.style.display = 'none';
-  btnDisconnect.style.display = 'flex';
-  if (simPanel) simPanel.style.display = 'block';
-  if (simBadge) simBadge.style.display = 'block';
-
-  placeholder.style.display = 'none';
-  overlay.style.display = 'block';
-
-  startSimVideoSource();
-  startSimTelemetry();
-
-  addLogEntry('info', 'Simulation Mode Enabled', 'Offline test environment ready');
-}
-
-function stopSimulation() {
-  state.isSimulation = false;
-  state.connected = false;
-
-  const btnSim = document.getElementById('btnSim');
-  if (btnSim) btnSim.classList.remove('active');
-
-  const simPanel = document.getElementById('simPanel');
-  const simBadge = document.getElementById('simOverlayBadge');
-  if (simPanel) simPanel.style.display = 'none';
-  if (simBadge) simBadge.style.display = 'none';
-
-  stopSimVideoSource();
-  stopSimTelemetry();
-  setConnectedUI(false);
-}
-
-function startSimTelemetry() {
-  stopSimTelemetry();
-  state.simTelemetryInterval = setInterval(() => {
-    if (!state.isSimulation) return;
-    const sharp = Math.floor(1200 + Math.random() * 400);
-    const peak = Math.floor(1700 + Math.random() * 300);
-    const ldr = Math.floor(600 + Math.random() * 250);
-
-    document.getElementById('statSharp').textContent = sharp;
-    document.getElementById('statPeak').textContent = peak;
-    document.getElementById('statLDR').textContent = ldr;
-  }, 1200);
-}
-
-function stopSimTelemetry() {
-  if (state.simTelemetryInterval) {
-    clearInterval(state.simTelemetryInterval);
-    state.simTelemetryInterval = null;
-  }
-}
-
-function startSimVideoSource() {
-  stopSimVideoSource();
-  const video = document.getElementById('webcamVideo');
-  const canvas = document.getElementById('simCanvas');
-
-  if (state.simVideoSource === 'webcam' && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-    navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
-      .then(stream => {
-        state.simWebcamStream = stream;
-        video.srcObject = stream;
-        video.style.display = 'block';
-        canvas.style.display = 'none';
-        const lbl = document.getElementById('simSourceLabel');
-        if (lbl) lbl.textContent = 'WebCam PC';
-      })
-      .catch(err => {
-        console.warn('Webcam não disponível, usando scanner canvas:', err);
-        state.simVideoSource = 'canvas';
-        initSimCanvas();
-      });
-  } else {
-    initSimCanvas();
-  }
-}
-
-function stopSimVideoSource() {
-  const video = document.getElementById('webcamVideo');
-  const canvas = document.getElementById('simCanvas');
-
-  if (state.simWebcamStream) {
-    state.simWebcamStream.getTracks().forEach(track => track.stop());
-    state.simWebcamStream = null;
-  }
-  if (video) video.style.display = 'none';
-  if (canvas) canvas.style.display = 'none';
-
-  if (state.simCanvasAnimId) {
-    cancelAnimationFrame(state.simCanvasAnimId);
-    state.simCanvasAnimId = null;
-  }
-}
-
-function simToggleVideoSource() {
-  if (!state.isSimulation) return;
-  state.simVideoSource = (state.simVideoSource === 'canvas') ? 'webcam' : 'canvas';
-  startSimVideoSource();
-  showToast(`Video source: ${state.simVideoSource === 'webcam' ? 'PC WebCam' : 'Simulated Scanner'}`, 'info');
-}
-
-function initSimCanvas() {
-  const canvas = document.getElementById('simCanvas');
-  const video = document.getElementById('webcamVideo');
-  if (!canvas || !video) return;
-
-  video.style.display = 'none';
-  canvas.style.display = 'block';
-  const lbl = document.getElementById('simSourceLabel');
-  if (lbl) lbl.textContent = 'Scanner Canvas';
-
-  const ctx = canvas.getContext('2d');
-  let angle = 0;
-
-  function render() {
-    if (!state.isSimulation || state.simVideoSource !== 'canvas') return;
-
-    if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
-      canvas.width = canvas.clientWidth || 640;
-      canvas.height = canvas.clientHeight || 480;
-    }
-
-    const w = canvas.width;
-    const h = canvas.height;
-
-    ctx.fillStyle = '#0b0f19';
-    ctx.fillRect(0, 0, w, h);
-
-    // Tech Grid
-    ctx.strokeStyle = 'rgba(59, 130, 246, 0.08)';
-    ctx.lineWidth = 1;
-    const gridSize = 40;
-    for (let x = 0; x < w; x += gridSize) {
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
-    }
-    for (let y = 0; y < h; y += gridSize) {
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
-    }
-
-    // Dynamic Face Target Center
-    const cx = w / 2 + Math.sin(angle) * 15;
-    const cy = h / 2 + Math.cos(angle * 0.7) * 10;
-    const boxW = 180;
-    const boxH = 220;
-
-    // Face mesh oval
-    ctx.strokeStyle = 'rgba(96, 165, 250, 0.4)';
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath();
-    ctx.ellipse(cx, cy, boxW / 2.2, boxH / 2.2, 0, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // Bounding Box
-    ctx.strokeStyle = 'rgba(34, 197, 94, 0.8)';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(cx - boxW / 2, cy - boxH / 2, boxW, boxH);
-
-    // Corner brackets
-    const cLen = 20;
-    ctx.strokeStyle = '#22c55e';
-    ctx.lineWidth = 3;
-
-    ctx.beginPath();
-    ctx.moveTo(cx - boxW / 2, cy - boxH / 2 + cLen);
-    ctx.lineTo(cx - boxW / 2, cy - boxH / 2);
-    ctx.lineTo(cx - boxW / 2 + cLen, cy - boxH / 2);
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.moveTo(cx + boxW / 2 - cLen, cy - boxH / 2);
-    ctx.lineTo(cx + boxW / 2, cy - boxH / 2);
-    ctx.lineTo(cx + boxW / 2, cy - boxH / 2 + cLen);
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.moveTo(cx - boxW / 2, cy + boxH / 2 - cLen);
-    ctx.lineTo(cx - boxW / 2, cy + boxH / 2);
-    ctx.lineTo(cx - boxW / 2 + cLen, cy + boxH / 2);
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.moveTo(cx + boxW / 2 - cLen, cy + boxH / 2);
-    ctx.lineTo(cx + boxW / 2, cy + boxH / 2);
-    ctx.lineTo(cx + boxW / 2, cy + boxH / 2 - cLen);
-    ctx.stroke();
-
-    // Facial landmark points
-    ctx.fillStyle = '#60a5fa';
-    const pts = [
-      { x: cx - 35, y: cy - 25 },
-      { x: cx + 35, y: cy - 25 },
-      { x: cx, y: cy + 5 },
-      { x: cx - 25, y: cy + 45 },
-      { x: cx + 25, y: cy + 45 },
-      { x: cx, y: cy + 50 }
-    ];
-    pts.forEach(p => {
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
-      ctx.fill();
-    });
-
-    ctx.fillStyle = '#22c55e';
-    ctx.font = '12px "JetBrains Mono", monospace';
-    ctx.fillText('FACE_DETECTED [99.2%]', cx - boxW / 2, cy - boxH / 2 - 8);
-
-    angle += 0.03;
-    state.simCanvasAnimId = requestAnimationFrame(render);
-  }
-
-  render();
-}
-
-function simTriggerEvent(granted, name) {
-  if (!state.isSimulation && !state.connected) {
-    showToast('Enable Simulation or Connect to ESP32 first!', 'warning');
-    return;
-  }
-  if (granted) {
-    registerAccessEvent(true, `Face: ${name}`);
-  } else {
-    registerAccessEvent(false, `Reason: ${name}`);
-  }
-}
 
 /* ===================== CAMERA CONTROLS ===================== */
 async function sendControl(cmd, extraParams = '') {
@@ -483,20 +348,7 @@ async function sendControl(cmd, extraParams = '') {
     showToast('Connect to ESP32 first!', 'warning');
     return false;
   }
-  if (state.isSimulation) {
-    if (cmd === 't') {
-      setTimeout(() => {
-        const randGranted = Math.random() > 0.3;
-        simTriggerEvent(randGranted, randGranted ? 'Simulated User' : 'Face Not Recognized');
-      }, 800);
-    } else if (cmd === 'm' || cmd === 'c') {
-      const simulatedName = extraParams ? decodeURIComponent(extraParams.replace('&name=', '')) : 'New Simulated Face';
-      setTimeout(() => {
-        simTriggerEvent(true, `${simulatedName} Enrolled (Simulation)`);
-      }, 1500);
-    }
-    return true;
-  }
+
   try {
     const url = `http://${state.esp32Ip}/control?cmd=${cmd}${extraParams}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
@@ -524,19 +376,40 @@ async function testAccess() {
   const ok = await sendControl('t');
   if (ok) {
     showToast('Initiating access attempt...', 'info');
+    // Liga a barra de scan otimisticamente; o poll do /info confirma
+    // (ou corrige) o estado real em ate 3s, e desliga sozinha quando
+    // a tentativa terminar (last_acc muda ou scanning volta a false).
+    const overlay = document.getElementById('cameraOverlay');
+    if (overlay) overlay.classList.add('scanning');
+    state.lastScanning = true;
+  }
+}
+
+async function remoteUnlock() {
+  if (!confirm('Unlock the door remotely?')) return;
+  const ok = await sendControl('o');
+  if (ok) {
+    showToast('🔓 Door unlocked remotely', 'success');
+    addLogEntry('granted', 'Remote Unlock', 'Opened via dashboard');
   }
 }
 
 function openEnrollModal() {
-  const modal = document.getElementById('enrollModalBackdrop');
-  const input = document.getElementById('enrollNameInput');
-  if (modal) {
-    modal.style.display = 'flex';
-    if (input) {
-      input.value = '';
-      input.focus();
-    }
+  if (state.lastEnrollStatus === 'capturing') {
+    showToast('Enrollment already in progress!', 'warning');
+    return;
   }
+  fetchFaces(false).then(() => {
+    const modal = document.getElementById('enrollModalBackdrop');
+    const input = document.getElementById('enrollNameInput');
+    if (modal) {
+      modal.style.display = 'flex';
+      if (input) {
+        input.value = '';
+        input.focus();
+      }
+    }
+  });
 }
 
 function closeEnrollModal() {
@@ -549,16 +422,147 @@ function closeEnrollModal() {
 async function confirmEnroll() {
   const nameInput = document.getElementById('enrollNameInput');
   const nameVal = nameInput ? nameInput.value.trim() : '';
-  const extraParams = nameVal ? `&name=${encodeURIComponent(nameVal)}` : '';
-  
+  if (!nameVal) {
+    showToast('Name cannot be empty', 'warning');
+    return;
+  }
+  if (state.facesList.includes(nameVal)) {
+    showToast('Name already exists!', 'error');
+    return;
+  }
+  const extraParams = `&name=${encodeURIComponent(nameVal)}`;
+
   closeEnrollModal();
-  
+
   const ok = await sendControl('m', extraParams);
   if (ok) {
-    const nameStr = nameVal ? ` (${nameVal})` : '';
-    showToast(`📸 Multiple enrollment started! Look at the camera.${nameStr}`, 'warning');
-    addLogEntry('info', 'Enrollment started', `Waiting for face...${nameStr}`);
+    // >>> CORRECAO PRINCIPAL <<<
+    // Marca enroll como ATIVO agora mesmo, ANTES da primeira poll do /info.
+    // Sem isto, a primeira ronda de status durante a captura (quando o ESP
+    // esta mais ocupado e nao responde o /info) ainda usava o limite curto
+    // (5s / 3 falhas) e derrubava o dashboard antes de descobrir que era um
+    // cadastro em andamento.
+    beginEnrollGuard();
+    showToast(`📸 Multiple enrollment started! Look at the camera. (${nameVal})`, 'warning');
+    addLogEntry('info', 'Enrollment started', `Waiting for face... (${nameVal})`);
   }
+}
+
+async function cancelEnroll() {
+  const ok = await sendControl('x');
+  if (ok) {
+    showToast('Cancelling enrollment...', 'info');
+  }
+}
+
+/* Liga o "modo enroll": polling tolerante (timeout 15s / 30 falhas).
+   Zera falhas acumuladas e arma uma trava de seguranca de 120s, caso o ESP
+   nunca reporte o fim do cadastro. */
+function beginEnrollGuard() {
+  state.enrollActive = true;
+  state.pollFailCount = 0;
+  if (state.enrollGuardTimer) clearTimeout(state.enrollGuardTimer);
+  state.enrollGuardTimer = setTimeout(() => {
+    state.enrollActive = false;
+    state.enrollGuardTimer = null;
+  }, 120000);
+}
+
+/* Desliga o "modo enroll" e cancela a trava de seguranca. */
+function endEnrollGuard() {
+  state.enrollActive = false;
+  if (state.enrollGuardTimer) { clearTimeout(state.enrollGuardTimer); state.enrollGuardTimer = null; }
+}
+
+/* ===================== FACES MANAGEMENT ===================== */
+async function fetchFaces(render = true) {
+  if (!state.connected) return;
+  if (state.enrollActive) return;
+  try {
+    const res = await fetch(`http://${state.esp32Ip}/faces`, { signal: AbortSignal.timeout(3000) });
+    if (res.ok) {
+      state.facesList = await res.json();
+      if (render) renderFacesList();
+    }
+  } catch (e) {
+    console.error('Error fetching faces:', e);
+  }
+}
+
+function openFacesModal() {
+  document.getElementById('facesModalBackdrop').style.display = 'flex';
+  document.getElementById('facesListLoading').style.display = 'block';
+  document.getElementById('facesListContainer').style.display = 'none';
+  document.getElementById('btnDeleteSelectedFaces').style.display = 'none';
+  fetchFaces();
+}
+
+function closeFacesModal() {
+  document.getElementById('facesModalBackdrop').style.display = 'none';
+}
+
+function renderFacesList() {
+  document.getElementById('facesListLoading').style.display = 'none';
+  const container = document.getElementById('facesListContainer');
+  container.style.display = 'block';
+  if (state.facesList.length === 0) {
+    container.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding: 10px;">No faces registered.</div>';
+    document.getElementById('btnDeleteSelectedFaces').style.display = 'none';
+    return;
+  }
+  document.getElementById('btnDeleteSelectedFaces').style.display = 'inline-block';
+  container.innerHTML = state.facesList.map((name, i) => `
+        <div class="face-item">
+          <input type="checkbox" class="face-checkbox" value="${escapeHtml(name)}" />
+          <div class="face-item-name">
+            <input type="text" id="faceName_${i}" value="${escapeHtml(name)}" onblur="renameFace('${escapeHtml(name)}', 'faceName_${i}')" onkeydown="if(event.key === 'Enter') this.blur()" />
+          </div>
+          <button class="btn-danger" style="padding: 4px 8px; font-size: 12px; border-radius: 4px;" onclick="deleteFace('${escapeHtml(name)}')">Delete</button>
+        </div>
+      `).join('');
+}
+
+async function deleteFace(name) {
+  if (!confirm(`Delete face '${name}'?`)) return;
+  document.getElementById('facesListLoading').style.display = 'block';
+  document.getElementById('facesListContainer').style.display = 'none';
+  await sendControl('k', `&name=${encodeURIComponent(name)}`);
+  showToast(`Face '${name}' deleted`, 'success');
+  setTimeout(fetchFaces, 500);
+}
+
+async function renameFace(oldName, inputId) {
+  const newName = document.getElementById(inputId).value.trim();
+  if (!newName || newName === oldName) {
+    document.getElementById(inputId).value = oldName;
+    return;
+  }
+  if (state.facesList.includes(newName)) {
+    showToast('Name already exists!', 'error');
+    document.getElementById(inputId).value = oldName;
+    return;
+  }
+  document.getElementById('facesListLoading').style.display = 'block';
+  document.getElementById('facesListContainer').style.display = 'none';
+  await sendControl('e', `&name=${encodeURIComponent(oldName)}&newname=${encodeURIComponent(newName)}`);
+  showToast(`Face renamed to '${newName}'`, 'success');
+  setTimeout(fetchFaces, 500);
+}
+
+async function deleteSelectedFaces() {
+  const checkboxes = document.querySelectorAll('.face-checkbox:checked');
+  if (checkboxes.length === 0) return;
+  if (!confirm(`Delete ${checkboxes.length} selected face(s)?`)) return;
+
+  document.getElementById('facesListLoading').style.display = 'block';
+  document.getElementById('facesListContainer').style.display = 'none';
+
+  for (const cb of checkboxes) {
+    await sendControl('k', `&name=${encodeURIComponent(cb.value)}`);
+    await new Promise(r => setTimeout(r, 600));
+  }
+  showToast('Selected faces deleted', 'success');
+  fetchFaces();
 }
 
 function updateControlButtons() {
@@ -566,6 +570,13 @@ function updateControlButtons() {
   if (btnC) btnC.className = 'ctrl-btn' + (state.isContinuous ? ' active' : '');
 }
 
+function toggleStats() {
+  const bar = document.getElementById('statsBar');
+  const btn = document.getElementById('btnToggleStats');
+  if (!bar) return;
+  const showing = bar.classList.toggle('visible');
+  if (btn) btn.classList.toggle('active', showing);
+}
 
 
 /* ===================== MANUAL LOG (for demonstration) ===================== */
@@ -789,6 +800,4 @@ function escapeHtml(str) {
 /* ===================== EXPOSE FOR CONSOLE TESTING ===================== */
 window.registerAccessEvent = registerAccessEvent;
 window.addLogEntry = addLogEntry;
-window.toggleSimulationMode = toggleSimulationMode;
-window.simTriggerEvent = simTriggerEvent;
-window.simToggleVideoSource = simToggleVideoSource;
+
