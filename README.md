@@ -70,11 +70,13 @@ O case foi modelado sob medida para acomodar o ESP32-CAM e os demais componentes
 O ESP32 atua como servidor HTTP na rede local e o Dashboard funciona como cliente (frontend).
 
 1. O **Dashboard** requer o endereço IP do ESP32 na rede local para realizar a conexão.
-2. Uma vez conectado, o dashboard consome as seguintes rotas (endpoints) disponibilizadas pelo firmware do ESP32:
-   - `http://{IP}:81/stream` — stream de vídeo (MJPEG).
-   - `http://{IP}/info` — status em tempo real do sistema (JSON).
-   - `http://{IP}/control?cmd={comando}` — execução de comandos como liberação remota ou apagar rosto.
-   - `http://{IP}/faces` — retorna a lista de todos os rostos salvos na memória do ESP32.
+2. O sistema divide a comunicação em **duas portas** no mesmo IP para não travar os comandos enquanto transmite o vídeo:
+   - **Porta 81:** Dedicada exclusivamente ao stream de vídeo.
+     - `http://{IP}:81/stream` — stream de vídeo ao vivo (MJPEG).
+   - **Porta 80 (Padrão):** Dedicada para a API e comandos.
+     - `http://{IP}/info` — status em tempo real do sistema (JSON).
+     - `http://{IP}/control?cmd={comando}` — execução de comandos como liberação remota ou apagar rosto.
+     - `http://{IP}/faces` — retorna a lista de todos os rostos salvos na memória do ESP32.
 3. As configurações de IP do ESP32 e os logs de acesso são salvos localmente no navegador (`LocalStorage`), preservando o histórico mesmo após recarregar a página.
 
 ---
