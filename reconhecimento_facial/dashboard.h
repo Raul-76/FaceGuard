@@ -612,7 +612,7 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
     /* ===================== CONTROLS ===================== */
     .controls-grid {
       display: grid;
-      grid-template-columns: repeat(2, 1fr);
+      grid-template-columns: repeat(3, 1fr);
       gap: 8px;
       padding: 14px 16px;
       border-bottom: 1px solid var(--border);
@@ -1459,14 +1459,8 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
         <!-- Camera Controls -->
         <div class="controls-grid" id="controlsGrid">
 
-          <button class="ctrl-btn" id="btnTestAccess" onclick="testAccess()" title="Test access (Attempt)">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-              <circle cx="12" cy="7" r="4" />
-            </svg>
-            Test Access
-          </button>
-          <button class="ctrl-btn enroll-btn" id="btnOpenEnrollModal" onclick="openEnrollModal()" title="Enroll face">
+
+           <button class="ctrl-btn enroll-btn" id="btnOpenEnrollModal" onclick="openEnrollModal()" title="Enroll face">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M16 21v-2a4 4 0 0 4 4H5a4 4 0 0 4 4v2" />
               <circle cx="8.5" cy="7" r="4" />
@@ -1475,15 +1469,15 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
             </svg>
             Enroll
           </button>
-          <button class="ctrl-btn btn-danger" id="btnCancelEnroll" onclick="cancelEnroll()" title="Cancel Enrollment" style="display: none;">
+          <button class="ctrl-btn" id="btnTestAccess" onclick="testAccess()" title="Test access (Attempt)">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="10"></circle>
-              <line x1="15" y1="9" x2="9" y2="15"></line>
-              <line x1="9" y1="9" x2="15" y2="15"></line>
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+              <circle cx="12" cy="7" r="4" />
             </svg>
-            Cancel
+            Test Access
           </button>
-          <button class="ctrl-btn" id="btnManageFaces" onclick="openFacesModal()" title="Manage Faces" style="grid-column: 1 / -1;">
+         
+          <button class="ctrl-btn" id="btnManageFaces" onclick="openFacesModal()" title="Manage Faces">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
               <circle cx="9" cy="7" r="4"></circle>
@@ -1492,6 +1486,22 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
             </svg>
             Faces
           </button>
+          <button class="ctrl-btn active-green" id="btnRemoteUnlock" onclick="remoteUnlock()" title="Remote Unlock" style="grid-column: 1 / -1;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+              <path d="M7 11V7a5 5 0 0 1 9.9-1"></path>
+            </svg>
+            Remote Unlock
+          </button>
+          <button class="ctrl-btn btn-danger" id="btnCancelEnroll" onclick="cancelEnroll()" title="Cancel Enrollment" style="grid-column: 1 / -1;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="15" y1="9" x2="9" y2="15"></line>
+              <line x1="9" y1="9" x2="15" y2="15"></line>
+            </svg>
+            Cancel
+          </button>
+          
         </div>
 
 
@@ -2052,6 +2062,15 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
         const overlay = document.getElementById('cameraOverlay');
         if (overlay) overlay.classList.add('scanning');
         state.lastScanning = true;
+      }
+    }
+
+    async function remoteUnlock() {
+      if (!confirm('Unlock the door remotely?')) return;
+      const ok = await sendControl('o');
+      if (ok) {
+        showToast('🔓 Door unlocked remotely', 'success');
+        addLogEntry('granted', 'Remote Unlock', 'Opened via dashboard');
       }
     }
 
