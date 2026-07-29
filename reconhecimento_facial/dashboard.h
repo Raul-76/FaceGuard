@@ -1778,7 +1778,7 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
           // o feed pausado. Recarregar rapido (1.5s) atropela o ESP ocupado e
           // pode derrubar o dashboard. Entao: durante o enroll, espera bem mais
           // antes de tentar recarregar, dando tempo do ESP terminar a captura.
-          const espera = state.enrollActive ? 5000 : 1500;
+          const espera = state.enrollActive ? 5000 : 8000;
           state.streamRetries = (state.streamRetries || 0) + 1;
           console.warn(`Stream pausou (retry ${state.streamRetries}), recarregando em ${espera}ms`);
           setTimeout(() => {
