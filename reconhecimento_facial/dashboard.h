@@ -1696,7 +1696,8 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
       pollFailCount: 0,
       enrollActive: false,
       reconnectInterval: null,
-      enrollGuardTimer: null
+      enrollGuardTimer: null,
+      pollInFlight: false
     };
     let lastAccessStateStr = "-";
 
@@ -1771,11 +1772,20 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
 
       img.onerror = () => {
         if (state.connected) {
-          // Ja estava conectado e o stream tropecou: recarrega sozinho
-          console.warn('Stream falhou, recarregando...');
-          setTimeout(() => { img.src = streamUrl + '?t=' + Date.now(); }, 1500);
+          // Durante o cadastro o ESP fica preso na inferencia (detect/enroll) e
+          // para de publicar frame por varios segundos. O navegador acha que o
+          // stream morreu e dispara este onerror -> mas NAO e queda real, e so
+          // o feed pausado. Recarregar rapido (1.5s) atropela o ESP ocupado e
+          // pode derrubar o dashboard. Entao: durante o enroll, espera bem mais
+          // antes de tentar recarregar, dando tempo do ESP terminar a captura.
+          const espera = state.enrollActive ? 5000 : 1500;
+          state.streamRetries = (state.streamRetries || 0) + 1;
+          console.warn(`Stream pausou (retry ${state.streamRetries}), recarregando em ${espera}ms`);
+          setTimeout(() => {
+            // so recarrega se ainda estiver conectado (evita recarregar depois de sair)
+            if (state.connected) img.src = streamUrl + '?t=' + Date.now();
+          }, espera);
         } else {
-          // Nunca chegou a conectar: ai sim e erro de IP/placa offline
           stopStream();
           setConnectedUI(false);
           showToast(`Could not connect to stream.\nCheck IP and if ESP32 is online.`, 'error');
@@ -1863,8 +1873,10 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
     }
 
     async function pollStatus(ip) {
+      if (state.pollInFlight) return;        // nunca empilha /info -> nao esgota sockets do ESP
+      state.pollInFlight = true;
       try {
-        const timeoutMs = state.enrollActive ? 15000 : 5000;
+        const timeoutMs = state.enrollActive ? 15000 : 10000;
         const res = await fetch(`http://${ip}/info`, { signal: AbortSignal.timeout(timeoutMs) });
         if (!res.ok) throw new Error('Not OK');
         const text = await res.text();
@@ -1872,19 +1884,21 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
         try {
           data = JSON.parse(text);
         } catch (parseErr) {
-          console.warn('JSON inválido, ignorando este poll', parseErr);
-          return; // frame corrompido: ignora, NÃO desconecta
+          console.warn('JSON invalido, ignorando este poll', parseErr);
+          return;
         }
         state.pollFailCount = 0;
         applyStatusToUI(data);
       } catch (e) {
+        // MUDANCA CRITICA: falha de /info NAO derruba mais a conexao.
+        // O stream MJPEG (porta 81) e a fonte de verdade. Um /info lento
+        // porque o ESP esta ocupado no enroll nao pode matar o feed. Se o
+        // ESP morrer DE VERDADE, o proprio <img> do stream dispara onerror
+        // e tenta recarregar sozinho.
         state.pollFailCount = (state.pollFailCount || 0) + 1;
-        // Durante o enroll o ESP fica MUITO ocupado -> tolera bem mais antes de desistir.
-        const limite = state.enrollActive ? 30 : 3;
-        console.warn(`pollStatus falhou (${state.pollFailCount}/${limite})`, e);
-        if (state.pollFailCount >= limite && state.connected) {
-          handleConnectionLost(ip);
-        }
+        console.warn(`pollStatus falhou (${state.pollFailCount}) - mantendo stream vivo`, e);
+      } finally {
+        state.pollInFlight = false;
       }
     }
 
@@ -1951,15 +1965,20 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
       }
 
       // Mantem o modo enroll (polling tolerante) enquanto o ESP estiver capturando.
-      // NAO derruba o flag em estados intermediarios/idle -> so em estados finais,
-      // pra nao voltar ao limite curto no meio de uma captura e derrubar a conexao.
+      // CORRECAO: so encerra o guard na TRANSICAO para um estado final. Sem isto,
+      // o "success" que sobra do cadastro ANTERIOR (o ESP nunca volta pra "idle")
+      // chegava numa poll logo apos o confirmEnroll e chamava endEnrollGuard(),
+      // desarmando a tolerancia no comeco do 2o cadastro -> desconexao.
+      const enrollStatusChanged = (data.enroll_status !== state.lastEnrollStatus);
       if (data.enroll_status === 'capturing') {
-        beginEnrollGuard();               // re-arma tolerancia + trava de 120s
-      } else if (data.enroll_status === 'success' ||
-                 data.enroll_status === 'failed' ||
-                 data.enroll_status === 'cancelled') {
-        endEnrollGuard();                 // cadastro terminou -> volta ao normal
+        beginEnrollGuard();               // re-arma tolerancia enquanto captura
+      } else if (enrollStatusChanged &&
+                 (data.enroll_status === 'success' ||
+                  data.enroll_status === 'failed' ||
+                  data.enroll_status === 'cancelled')) {
+        endEnrollGuard();                 // so no MOMENTO em que terminou
       }
+      // "success"/"idle" repetido (estado de repouso) NAO desarma mais o guard.
       // (se vier 'idle' ou vazio, respeita o flag otimista setado no confirmEnroll)
 
       // Handle enrollment status
@@ -2119,6 +2138,7 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(
     /* ===================== FACES MANAGEMENT ===================== */
     async function fetchFaces(render = true) {
       if (!state.connected) return;
+      if (state.enrollActive) return;
       try {
         const res = await fetch(`http://${state.esp32Ip}/faces`, { signal: AbortSignal.timeout(3000) });
         if (res.ok) {
