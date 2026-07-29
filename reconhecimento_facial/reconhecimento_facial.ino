@@ -167,6 +167,8 @@ volatile EstadoLED estadoLED = LED_OFF;
 // pedido de tentativa: setado pelo botao (loop), consumido pela task da camera
 volatile bool pedidoReconhecimento = false;
 
+volatile bool pedidoAcessoRemoto = false;
+
 TaskHandle_t handleCamera = nullptr;
 TaskHandle_t handleLED = nullptr;
 
@@ -187,6 +189,7 @@ void tocarMelodia(const Nota melodia[]);
 uint16_t lerLDR();
 void ajustaLuz();
 void testeLuz();
+void liberarAcessoRemoto();
 
 bool modoContinuo = false; // 'r' liga: imprime similaridade a cada frame
 uint32_t sharpMax = 0;     // pico de nitidez ja visto (guia pra focar a lente)
@@ -228,6 +231,7 @@ void tarefaCamera(void *pv) {
                   updateEnrollStatus("capturing", "starting...");   // idem
                   enrollMultiplo(3, httpCommandName[0] ? String(httpCommandName) : ""); break;
         case 'x': cancelarCadastro = true; break;
+        case 'o': pedidoAcessoRemoto = true; break;
         case 'k': {
             File src = SPIFFS.open("/fr.bin", "rb");
             File dst = SPIFFS.open("/fr.tmp", "wb");
@@ -291,6 +295,11 @@ void tarefaCamera(void *pv) {
     if (pedidoReconhecimento) {
       pedidoReconhecimento = false;
       runTentativa();
+    }
+
+      if (pedidoAcessoRemoto) {
+      pedidoAcessoRemoto = false;
+      liberarAcessoRemoto();
     }
 
     // captura + publica sempre (feed vivo)
@@ -617,6 +626,13 @@ Veredito runTentativa() {
   lastAccType = "denied";
   lastAccName = "unknown";
   return NEGADO;
+}
+
+void liberarAcessoRemoto() {
+  Serial.println(">> REMOTE ACCESS granted via dashboard");
+  sinalizaResultado(pinoVerde, somPortaAberta);
+  lastAccType = "granted";
+  lastAccName = "Remote";
 }
 
 // ==================== BUFFER COMPARTILHADO DO STREAM ====================
