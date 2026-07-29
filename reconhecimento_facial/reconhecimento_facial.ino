@@ -693,12 +693,29 @@ static esp_err_t facesHandler(httpd_req_t *req) {
   String json = "[";
   File file = SPIFFS.open("/fr.bin", "rb");
   bool first = true;
+  String vistos[32];      // nomes ja adicionados, evita duplicata no multi-enroll
+  int totalVistos = 0;
+
   while(file && file.available()) {
     enrolled_face_t proto;
     file.read((uint8_t*)&proto, sizeof(proto));
     if (proto.ctrl[0] != 0x14 || proto.ctrl[1] != 0x08) break; // Parse error
+
+    String nomeAtual = String(proto.name);
+
+    // pula se esse nome ja foi listado (multi-enroll grava varios embeddings
+    // com o MESMO nome, um por captura -- sem isso o dashboard mostraria
+    // "joao, joao, joao" em vez de so "joao")
+    bool jaVisto = false;
+    for (int i = 0; i < totalVistos; i++) {
+      if (vistos[i] == nomeAtual) { jaVisto = true; break; }
+    }
+    if (jaVisto) continue;
+
+    if (totalVistos < 32) vistos[totalVistos++] = nomeAtual;
+
     if (!first) json += ",";
-    json += "\"" + String(proto.name) + "\"";
+    json += "\"" + nomeAtual + "\"";
     first = false;
   }
   if(file) file.close();
@@ -847,8 +864,8 @@ void startServer() {
   cfg.server_port = 80;
   cfg.ctrl_port = 32768;
   cfg.max_uri_handlers = 8;
-  //cfg.stack_size = 8192;
-  cfg.stack_size = 6144;
+  cfg.stack_size = 8192;
+  //cfg.stack_size = 6144;
   //cfg.stack_size = 4096;
   cfg.lru_purge_enable = true;
   cfg.recv_wait_timeout = 10;   // segundos: nao derruba conexao lenta no meio
@@ -875,8 +892,8 @@ void startServer() {
   cfg2.server_port = 81;
   cfg2.ctrl_port = 32769;
   cfg2.max_uri_handlers = 2;
-  //cfg2.stack_size = 8192;
-  cfg2.stack_size = 6144;
+  cfg2.stack_size = 8192;
+  //cfg2.stack_size = 6144;
   //cfg2.stack_size = 4096;
   cfg2.lru_purge_enable = true;
   cfg2.core_id = 0;              // <-- NOVA
@@ -1227,7 +1244,7 @@ void enrollMultiplo(int alvo, String defaultName) {
     Serial.printf("   [HEAP livre: %u | maior bloco: %u]\n",
                   (unsigned)ESP.getFreeHeap(),
                   (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
-    vTaskDelay(10 / portTICK_PERIOD_MS);
+    //vTaskDelay(10 / portTICK_PERIOD_MS);
     
     yield();
     
