@@ -222,9 +222,11 @@ void tarefaCamera(void *pv) {
       httpCommand = 0;
       switch (cmd) {
         case 'c': modoContinuo = false; cancelarCadastro = false;
+                  updateEnrollStatus("capturing", "starting...");   // sai de "success" na hora
                   doEnroll(httpCommandName[0] ? String(httpCommandName) : ""); break;
         case 'm': modoContinuo = false; cancelarCadastro = false;
-                  enrollMultiplo(5, httpCommandName[0] ? String(httpCommandName) : ""); break;
+                  updateEnrollStatus("capturing", "starting...");   // idem
+                  enrollMultiplo(3, httpCommandName[0] ? String(httpCommandName) : ""); break;
         case 'x': cancelarCadastro = true; break;
         case 'k': {
             File src = SPIFFS.open("/fr.bin", "rb");
@@ -845,11 +847,14 @@ void startServer() {
   cfg.server_port = 80;
   cfg.ctrl_port = 32768;
   cfg.max_uri_handlers = 8;
-  cfg.stack_size = 8192;
+  //cfg.stack_size = 8192;
+  cfg.stack_size = 6144;
+  //cfg.stack_size = 4096;
   cfg.lru_purge_enable = true;
   cfg.recv_wait_timeout = 10;   // segundos: nao derruba conexao lenta no meio
   cfg.send_wait_timeout = 10;   // idem no envio da pagina grande
   cfg.core_id = 0;  
+  cfg.max_open_sockets = 5;   // menos chance de recusar conexao nova sob carga
 
   if (httpd_start(&g_server, &cfg) != ESP_OK) {
     Serial.println("ERRO: httpd porta 80 falhou");
@@ -870,7 +875,9 @@ void startServer() {
   cfg2.server_port = 81;
   cfg2.ctrl_port = 32769;
   cfg2.max_uri_handlers = 2;
-  cfg2.stack_size = 8192;
+  //cfg2.stack_size = 8192;
+  cfg2.stack_size = 6144;
+  //cfg2.stack_size = 4096;
   cfg2.lru_purge_enable = true;
   cfg2.core_id = 0;              // <-- NOVA
   cfg2.recv_wait_timeout = 10;   // <-- NOVA
@@ -1034,7 +1041,7 @@ void setup() {
   // Critico: com o prompt() bloqueante o setup travava aqui esperando o
   // monitor serial, e o loop() -- que le o switch e o botao -- nunca rodava.
   // Padrao seguro: so apaga com um "s" deliberado.
-  if (promptTimeout("Apagar cadastros? [s|n] (8s)", 10).startsWith("s")) {
+  if (promptTimeout("Apagar cadastros? [s|n] (8s)", 8000).startsWith("s")) {
     recognition.deleteAll();
     Serial.println("Apagado.");
   }
@@ -1050,6 +1057,7 @@ void setup() {
   Serial.println("  m = multiplos enrolls (com gate de nitidez)");
   Serial.println("  l = testar luz (varredura de duty x leitura do LDR)");
   Serial.println("  s = dormir agora (deep sleep por software)");
+  Serial.println("  x = cancelar cadastro");
   Serial.println();
   Serial.println("BOTAO  GPIO21: aperte para iniciar reconhecimento");
   Serial.println("SWITCH GPIO14: fechado = dorme | aberto = acorda");
@@ -1205,88 +1213,88 @@ void enrollMultiplo(int alvo, String defaultName) {
     nome = prompt("Nome para cadastro multiplo:");
   }
 
-  Serial.printf(">> >> Multi-enrollment for '%s' (target: %d good captures)\n",
-                nome.c_str(), alvo);
+  Serial.printf(">> Multi-enrollment for '%s' (target: %d)\n", nome.c_str(), alvo);
   int ok = 0;
   int tentativas = 0;
-  const int MAX_TENTATIVAS = alvo * 2;
+  const int MAX_TENTATIVAS = alvo * 3;
   const char *motivo = "";
+  char buf[96];   // buffer fixo reutilizado -> nao fragmenta o heap
 
-  estadoLED = LED_RESPIRANDO;     // <-- a task do LED assume o azul
+  estadoLED = LED_RESPIRANDO;
   analogWrite(pinoLuz, dutyLuz);
 
   while (ok < alvo) {
+    Serial.printf("   [HEAP livre: %u | maior bloco: %u]\n",
+                  (unsigned)ESP.getFreeHeap(),
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+    
+    yield();
+    
+    if (httpCommand == 'x') {
+        cancelarCadastro = true;
+        httpCommand = 0; // Limpa a variável para não processar o 'x' duas vezes
+    }
+
+    //server.handleClient();
+
     if (cancelarCadastro) {
-      String msg = String("Enrollment cancelled.");
-      Serial.println(">> " + msg);
-      updateEnrollStatus("cancelled", msg.c_str());
-      estadoLED = LED_OFF;
-      analogWrite(pinoAzul, 0);
-      analogWrite(pinoLuz, 0);
+      updateEnrollStatus("cancelled", "Enrollment cancelled.");
+      Serial.println(">> cancelled");
+      estadoLED = LED_OFF; analogWrite(pinoAzul, 0); analogWrite(pinoLuz, 0);
       return;
     }
     if (tentativas >= MAX_TENTATIVAS) {
-      String msg = String("Failed: only ") + ok + "/" + alvo + " saved after " + tentativas + " attempts";
-      Serial.println(">> " + msg);
-      updateEnrollStatus("failed", msg.c_str());
-      estadoLED = LED_OFF;         // <-- desliga
-      analogWrite(pinoAzul, 0);
-      analogWrite(pinoLuz, 0);
+      snprintf(buf, sizeof(buf), "Failed: only %d/%d after %d attempts", ok, alvo, tentativas);
+      updateEnrollStatus("failed", buf);
+      Serial.printf(">> %s\n", buf);
+      estadoLED = LED_OFF; analogWrite(pinoAzul, 0); analogWrite(pinoLuz, 0);
       return;
     }
     tentativas++;
 
-    String msg = String("Capture ") + (ok + 1) + "/" + alvo + " (attempt " + tentativas + ") - align your face and stay STILL...";
-    Serial.println("   " + msg);
-    updateEnrollStatus("capturing", msg.c_str());
+    snprintf(buf, sizeof(buf), "Capture %d/%d (attempt %d) - hold STILL...", ok + 1, alvo, tentativas);
+    updateEnrollStatus("capturing", buf);
+    Serial.printf("   %s\n", buf);
 
-    // ~2s entre capturas. Sem pulsaLEDEspera: a task do LED ja respira o azul.
     for (int k = 0; k < 12; k++) {
-      if (camera.capture().isOk()) {
-        publishFrame(camera.frame->buf, camera.frame->len);
-      }
+      if (camera.capture().isOk()) publishFrame(camera.frame->buf, camera.frame->len);
       ajustaLuz();
       delay(100);
     }
 
     if (!camera.capture().isOk()) {
-      Serial.println("   Capture failed, retrying");
       updateEnrollStatus("capturing", "Capture failed, retrying");
       continue;
     }
     publishFrame(camera.frame->buf, camera.frame->len);
 
     if (!frameOk(motivo)) {
-      String msg = String("Discarded (") + motivo + "), retrying";
-      Serial.println("   " + msg);
-      updateEnrollStatus("capturing", msg.c_str());
+      snprintf(buf, sizeof(buf), "Discarded (%s), retrying", motivo);
+      updateEnrollStatus("capturing", buf);
       continue;
     }
 
     if (!recognition.detect().isOk()) {
-      Serial.println("   No face detected, retrying");
       updateEnrollStatus("capturing", "No face detected, retrying");
       continue;
     }
 
-      if (recognition.enroll(nome).isOk()) {
+    if (recognition.enroll(nome).isOk()) {
       ok++;
-      String msg = String("OK (") + ok + "/" + alvo + " successful)";
-      Serial.println("   " + msg);
-      updateEnrollStatus("capturing", msg.c_str());
+      snprintf(buf, sizeof(buf), "OK (%d/%d)", ok, alvo);
+      updateEnrollStatus("capturing", buf);
+      Serial.printf("   %s\n", buf);
     } else {
-      String msg = recognition.exception.toString();
-      Serial.println(msg);
-      updateEnrollStatus("capturing", msg.c_str());
+      updateEnrollStatus("capturing", "enroll error, retrying");
+      Serial.println(recognition.exception.toString());
     }
   }
 
-  String finalMsg = String("Multi-enrollment completed: ") + ok + "/" + alvo + " successful captures for '" + nome + "'";
-  Serial.println(">> " + finalMsg);
-  updateEnrollStatus("success", finalMsg.c_str());
-  estadoLED = LED_OFF;            // <-- desliga
-  analogWrite(pinoAzul, 0);
-  analogWrite(pinoLuz, 0);
+  snprintf(buf, sizeof(buf), "Enrollment done: %d/%d for '%s'", ok, alvo, nome.c_str());
+  updateEnrollStatus("success", buf);
+  Serial.printf(">> %s\n", buf);
+  estadoLED = LED_OFF; analogWrite(pinoAzul, 0); analogWrite(pinoLuz, 0);
 }
 
 /**
