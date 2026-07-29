@@ -38,11 +38,12 @@ O Dashboard (localizado na pasta `dashboard`) é uma interface moderna construí
 ### Funcionalidades Principais
 
 - **Stream de Vídeo ao Vivo:** visualização em tempo real do stream MJPEG fornecido pelo ESP32-CAM.
+- **Segurança de Acesso:** Tela inicial protegida por login para administradores.
 - **Controles da Câmera:**
-  - Ligar/Desligar a **Detecção de Rostos**.
-  - Ligar/Desligar o **Reconhecimento Facial**.
+  - **Teste de Acesso:** Simula a validação de um rosto que está na câmera.
   - **Cadastrar Novos Rostos (Enrollment)** no sistema, para que sejam reconhecidos posteriormente.
-  - **Capturar Foto:** tira um snapshot da câmera e permite o download em `.jpg`.
+  - **Gerenciamento de Rostos:** Tela para visualizar cadastros, renomear ou apagar usuários.
+  - **Abertura Remota (Remote Unlock):** Libera o acesso remotamente via dashboard.
 - **Registro de Acessos (Logs):** histórico de tentativas de acesso (liberados e negados), com filtros de eventos (Todos, Liberados, Negados) e exportação em CSV.
 - **Estatísticas em Tempo Real:** contadores de acessos concedidos e negados exibidos visualmente na interface.
 
@@ -71,9 +72,9 @@ O ESP32 atua como servidor HTTP na rede local e o Dashboard funciona como client
 1. O **Dashboard** requer o endereço IP do ESP32 na rede local para realizar a conexão.
 2. Uma vez conectado, o dashboard consome as seguintes rotas (endpoints) disponibilizadas pelo firmware do ESP32:
    - `http://{IP}:81/stream` — stream de vídeo (MJPEG).
-   - `http://{IP}/status` — status atual das funcionalidades (reconhecimento, detecção etc.).
-   - `http://{IP}/control` — ativação/desativação de funcionalidades via parâmetros.
-   - `http://{IP}/capture` — snapshot em imagem (JPEG).
+   - `http://{IP}/info` — status em tempo real do sistema (JSON).
+   - `http://{IP}/control?cmd={comando}` — execução de comandos como liberação remota ou apagar rosto.
+   - `http://{IP}/faces` — retorna a lista de todos os rostos salvos na memória do ESP32.
 3. As configurações de IP do ESP32 e os logs de acesso são salvos localmente no navegador (`LocalStorage`), preservando o histórico mesmo após recarregar a página.
 
 ---
@@ -102,22 +103,22 @@ O firmware foi desenvolvido na IDE do Arduino, com o ambiente configurado para s
 
 ```
 FaceGuard/
-├── CameraWebServer_EletronicaFacil/   # Firmware do ESP32 (Back-End) — câmera, detecção e reconhecimento facial
+├── reconhecimento_facial/             # Firmware do ESP32 (Back-End) — câmera, detecção e reconhecimento facial
 ├── dashboard/                         # Interface Web (Front-End) — stream, controle e logs
-├── modelo-3d/                         # Arquivos de modelagem 3D do case (ex: .stl, .step)
+├── modelo 3d/                         # Arquivos de modelagem 3D do case (ex: .stl, .step)
 └── README.md
 ```
 
 **Sugestão de organização:**
-- `CameraWebServer_EletronicaFacil/` → mantém o firmware do ESP32.
+- `reconhecimento_facial/` → mantém o firmware do ESP32.
 - `dashboard/` → mantém o Dashboard web.
-- `modelo-3d/` → nova pasta para os arquivos de modelagem 3D do case, incluindo os arquivos de impressão (`.stl`/`.step`) e fotos do case finalizado.
+- `modelo 3d/` → nova pasta para os arquivos de modelagem 3D do case, incluindo os arquivos de impressão (`.stl`/`.step`) e fotos do case finalizado.
 
 ---
 
 ## 🚀 Como Utilizar
 
-1. Faça o upload do código presente em `CameraWebServer_EletronicaFacil` para sua placa ESP32-CAM através da IDE do Arduino.
+1. Faça o upload do código presente em `reconhecimento_facial` para sua placa ESP32-CAM através da IDE do Arduino.
 2. Anote o endereço IP exibido no Monitor Serial quando o ESP32 se conectar ao Wi-Fi.
 3. Abra o arquivo `dashboard/index.html` em qualquer navegador moderno.
 4. Na barra superior, digite o endereço IP do seu ESP32 e clique em **Conectar**.
