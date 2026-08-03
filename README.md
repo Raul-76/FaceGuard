@@ -1,4 +1,4 @@
-# 🔐 FaceGuard — Fechadura Inteligente com Reconhecimento Facial (ESP32-S3)
+# 🔐 FaceGuard — Smart Lock with Facial Recognition (ESP32-S3)
 
 ![ESP32-S3](https://img.shields.io/badge/ESP32--S3-firmware-E7352C?logo=espressif&logoColor=white)
 ![C++](https://img.shields.io/badge/C%2B%2B-00599C?logo=cplusplus&logoColor=white)
@@ -6,121 +6,114 @@
 ![Status](https://img.shields.io/badge/Status-Conclu%C3%ADdo-brightgreen)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-Este projeto implementa uma **fechadura de segurança com reconhecimento facial**, construída em torno de uma placa **ESP32-S3 (Freenove ESP32-S3-WROOM CAM, sensor OV2640)**. O sistema é composto por três frentes: firmware embarcado (back-end de visão computacional + controle da fechadura), dashboard web para monitoramento/controle e um case modelado e impresso em 3D.
+This project implements a **facial recognition security lock** built around an **ESP32-S3 board (Freenove ESP32-S3-WROOM CAM, OV2640 sensor)**. The system comprises three components: embedded firmware (handling computer vision and lock control), a web dashboard for monitoring and control, and a custom 3D-printed enclosure.
 
 ---
 
-## 🧩 Visão Geral do Sistema
+## 🧩 System Overview
 
-O ESP32-S3 atua como servidor HTTP na rede local, capturando vídeo continuamente, executando a detecção/reconhecimento facial e acionando os periféricos de hardware — incluindo o **motor de servo que trava e destrava a fechadura fisicamente**. O Dashboard, aberto localmente no navegador, se conecta ao ESP32 via HTTP para exibir o stream de vídeo ao vivo e permitir o controle remoto do sistema.
+The ESP32-S3 acts as a local network HTTP server, continuously capturing video, performing facial detection and recognition, and driving hardware peripherals—including the **servo motor that physically engages and disengages the lock**. The dashboard, accessed via a local web browser, connects to the ESP32 over HTTP to display the live video stream and enable remote system control.
 
-O reconhecimento não decide com base em um único frame: cada tentativa de acesso coleta uma **rajada de frames válidos e exige um número mínimo de votos a favor** para liberar a fechadura, o que reduz falsos positivos. Antes de qualquer inferência, um **quality-gate** descarta frames desfocados ou com movimento excessivo, e a exposição da câmera é fixada para manter os embeddings estáveis.
+Recognition decisions are not based on a single frame; instead, each access attempt collects a **burst of valid frames and requires a minimum number of positive votes** to unlock the mechanism, thereby reducing false positives. Before inference takes place, a **quality gate** discards blurred frames or those with excessive motion, and camera exposure is fixed to ensure stable embeddings.
 
-### 🔧 Hardware Utilizado
+### 🔧 Hardware Used
 
-- **ESP32-S3 (Freenove ESP32-S3-WROOM CAM, OV2640)** — captura de imagem e processamento de reconhecimento facial.
-- **Motor de Servo** — trava/destrava fisicamente a fechadura ao final de cada tentativa de acesso.
-- **LED Verde** — indica **Acesso Liberado**.
-- **LED Vermelho** — indica **Acesso Negado**.
-- **LED Azul (RGB "respirando")** — indica que o sistema está processando uma tentativa de reconhecimento.
-- **Buzzer** — toca melodias distintas para acesso liberado, acesso negado, alarme/violação e boot do sistema.
-- **LDR (Fotorresistor)** — sensor de luminosidade em malha fechada: ajusta automaticamente o brilho de uma luz de apoio (COB via MOSFET) para manter a iluminação do rosto estável durante o reconhecimento.
-- **Botão físico** — dispara manualmente uma tentativa de reconhecimento.
-- **Switch de Deep Sleep** — coloca o sistema em modo de baixíssimo consumo; a placa acorda automaticamente ao abrir o switch.
-- **Case impresso em 3D** — carcaça personalizada, modelada para acomodar a câmera e os demais componentes eletrônicos.
+- **ESP32-S3 (Freenove ESP32-S3-WROOM CAM, OV2640)** — image capture and facial recognition processing.
+- **Servo Motor** — physically locks/unlocks the mechanism at the end of each access attempt.
+- **Green LED** — indicates **Access Granted**.
+- **Red LED** — indicates **Access Denied**.
+- **Blue LED ("breathing" RGB effect)** — indicates the system is processing a recognition attempt.
+- **Buzzer** — plays distinct melodies for access granted, access denied, alarm/tamper alerts, and system startup. - **LDR (Photoresistor)** — closed-loop light sensor: automatically adjusts the brightness of an auxiliary light (COB via MOSFET) to maintain stable facial illumination during recognition.
+- **Physical button** — manually triggers a recognition attempt.
+- **Deep Sleep switch** — puts the system into ultra-low power mode; the board wakes up automatically when the switch is toggled.
+- **3D-printed case** — custom enclosure designed to house the camera and other electronic components.
 
 ---
 
-## 📊 O Dashboard Web (FaceGuard)
+## 📊 The Web Dashboard (FaceGuard)
 
-O Dashboard (localizado na pasta `dashboard`) é uma interface moderna construída com HTML, CSS (dark mode com glassmorphism) e JavaScript (Vanilla). Ele se conecta diretamente à câmera do ESP32 através de requisições HTTP para visualizar o stream de vídeo ao vivo e controlar o sistema.
-
+The Dashboard (located in the `dashboard` folder) is a modern interface built using HTML, CSS (dark mode with glassmorphism), and JavaScript (Vanilla). It connects directly to the ESP32 camera via HTTP requests to view the live video stream and control the system.
 <!-- 📸 Print do Dashboard -->
 <p align="center">
   <img src="dashboard/dashboard preview.jpg" alt="Print do Dashboard FaceGuard" width="700"/>
 </p>
 
-### Funcionalidades Principais
+### Key Features
 
-- **Stream de Vídeo ao Vivo:** visualização em tempo real do stream MJPEG fornecido pelo ESP32, com reconexão automática em caso de queda de conexão.
-- **Segurança de Acesso:** tela inicial protegida por login para administradores.
-- **Controles da Câmera:**
-  - **Teste de Acesso:** dispara uma tentativa de reconhecimento real na câmera.
-  - **Cadastrar Novos Rostos (Enrollment):** cadastro simples ou múltiplo (captura de várias amostras) de um mesmo rosto, com opção de cancelar o cadastro em andamento.
-  - **Gerenciamento de Rostos:** tela para visualizar cadastros, renomear ou apagar usuários (individualmente ou em lote).
-  - **Abertura Remota (Remote Unlock):** libera a fechadura remotamente via dashboard, sem precisar de reconhecimento facial.
-- **Registro de Acessos (Logs):** histórico de tentativas de acesso (liberados e negados), com filtros de eventos (Todos, Liberados, Negados) e exportação em CSV.
-- **Estatísticas em Tempo Real:** contadores de acessos concedidos e negados exibidos visualmente na interface.
+- **Live Video Stream:** Real-time viewing of the MJPEG stream provided by the ESP32, with automatic reconnection in the event of a connection loss.
+- **Access Security:** Login-protected startup screen for administrators.
+- **Camera Controls:**
+- **Access Test:** Triggers a live recognition attempt on the camera. 
+- **Face Enrollment:** Single or multiple registration (capturing several samples) of the same face, with an option to cancel an ongoing enrollment. 
+- **Face Management:** Screen to view registered faces and rename or delete users (individually or in batches). 
+- **Remote Unlock:** Remotely releases the lock via the dashboard, without requiring facial recognition.
+- **Access Logs:** History of access attempts (granted and denied), with event filters (All, Granted, Denied) and CSV export functionality.
+- **Real-Time Statistics:** Counters for granted and denied access attempts displayed visually on the interface.
 
 ---
 
-## 🖨️ Modelo 3D
+## 🖨️ 3D Model
 
-O case foi modelado sob medida para acomodar o ESP32-S3, a fechadura com servo e os demais componentes eletrônicos, e posteriormente impresso em impressora 3D.
-
-<!-- 📸 Print/foto do modelo 3D -->
+The enclosure was custom-designed to house the ESP32-S3, the servo-operated lock, and other electronic components, and was subsequently 3D printed. <!-- 📸 3D model screenshot/photo -->
 <p align="center">
-  <img src="modelo 3d/Modelo 3D Final.png" alt="Modelo 3D do case FaceGuard Visão 1" width="500"/>
+<img src="modelo 3d/Modelo 3D Final.png" alt="3D model of the FaceGuard case - View 1" width="500"/>
 </p>
 
-<!-- 📸 Print/foto do modelo 3D -->
+<!-- 📸 3D model screenshot/photo -->
 <p align="center">
-  <img src="modelo 3d/Modelo 3D Final - 2.png" alt="Modelo 3D do case FaceGuard Visão 2" width="500"/>
+<img src="modelo 3d/Modelo 3D Final - 2.png" alt="3D model of the FaceGuard case - View 2" width="500"/>
 </p>
 
 ---
 
-## ⚙️ Como Funciona
+## ⚙️ How It Works
 
-O ESP32 atua como servidor HTTP na rede local e o Dashboard funciona como cliente (frontend).
+The ESP32 acts as an HTTP server on the local network, while the Dashboard functions as the client (frontend).
 
-1. O **Dashboard** requer o endereço IP do ESP32 na rede local para realizar a conexão (o dispositivo também é anunciado via **mDNS** como `FaceGuard.local`).
-2. O sistema divide a comunicação em **duas portas** no mesmo IP para não travar os comandos enquanto transmite o vídeo:
-   - **Porta 81:** Dedicada exclusivamente ao stream de vídeo.
-     - `http://{IP}:81/stream` — stream de vídeo ao vivo (MJPEG).
-   - **Porta 80 (Padrão):** Dedicada para a interface, a API e os comandos.
-     - `http://{IP}/` — página de debug/monitoramento embarcada na própria placa.
-     - `http://{IP}/info` — status em tempo real do sistema (JSON): estado do reconhecimento, leitura do LDR, últimos acessos, etc.
-     - `http://{IP}/control?cmd={comando}` — execução de comandos como iniciar cadastro, testar acesso, liberar remotamente, renomear ou apagar um rosto.
-     - `http://{IP}/faces` — retorna a lista de todos os rostos salvos na memória do ESP32.
-3. **Fluxo de uma tentativa de acesso:** o botão físico (ou o comando remoto) dispara a captura de uma rajada de frames → cada frame passa pelo quality-gate (nitidez e movimento) → frames válidos são comparados contra os rostos cadastrados → ao atingir o número mínimo de votos a favor, o LED verde acende, a melodia de sucesso toca e o servo destrava a fechadura por alguns segundos antes de travar novamente; caso contrário, o LED vermelho acende e a melodia de acesso negado toca.
-4. A luz de apoio (COB) é ajustada automaticamente pelo LDR em malha fechada, mantendo a iluminação do rosto estável mesmo em ambientes escuros.
-5. Quando o switch de deep sleep é fechado, o sistema entra em baixíssimo consumo e a fechadura permanece travada; ele acorda automaticamente ao abrir o switch.
-6. As configurações de IP do ESP32 e os logs de acesso são salvos localmente no navegador (`LocalStorage`), preservando o histórico mesmo após recarregar a página.
-
----
-
-## 📚 Bibliotecas e Ambiente de Desenvolvimento
-
-O firmware foi desenvolvido na IDE do Arduino (Core ESP32 2.0.14), com o ambiente configurado para a placa **ESP32-S3** (OPI PSRAM habilitada, partição "Huge APP"). Principais bibliotecas utilizadas:
-
-- `eloquent_esp32cam.h` — captura de câmera e pipeline de alto nível para o ESP32-CAM/S3.
-- `eloquent_esp32cam/face/detection.h` — detecção de rosto.
-- `eloquent_esp32cam/face/recognition.h` — reconhecimento facial (cadastro, comparação e votação por similaridade).
-- `WiFi.h` — conexão à rede local.
-- `esp_http_server.h` — servidor HTTP nativo do ESP-IDF (mais leve que `WebServer.h`), usado para as rotas de API e o stream MJPEG.
-- `ESP32Servo.h` — controle do servo motor da fechadura.
-- `ESPmDNS.h` — descoberta do dispositivo na rede local via `FaceGuard.local`.
-- `driver/rtc_io.h` / `esp_sleep.h` — configuração do pino de wake-up e do modo deep sleep.
-
-> O código foi baseado na placa **Freenove ESP32-S3-WROOM CAM** com sensor **OV2640**.
+1. The **Dashboard** requires the ESP32's local network IP address to establish a connection (the device is also advertised via **mDNS** as `FaceGuard.local`).
+2. The system splits communication across **two ports** on the same IP to prevent command processing from stalling during video transmission:
+- **Port 81:** Dedicated exclusively to the video stream. 
+- `http://{IP}:81/stream` — live video stream (MJPEG). 
+- **Port 80 (Default):** Dedicated to the interface, API, and commands. 
+- `http://{IP}/` — debug/monitoring page hosted on the board itself. 
+- `http://{IP}/info` — real-time system status (JSON): recognition state, LDR reading, recent access logs, etc.
+- `http://{IP}/control?cmd={command}` — executes commands such as starting registration, testing access, remote unlocking, or renaming/deleting a face. 
+- `http://{IP}/faces` — returns the list of all faces stored in the ESP32's memory. 3. **Access attempt workflow:** the physical button (or remote command) triggers the capture of a burst of frames → each frame passes through a quality gate (sharpness and motion) → valid frames are compared against registered faces → upon reaching the minimum number of positive matches, the green LED lights up, the success melody plays, and the servo unlocks the lock for a few seconds before locking it again; otherwise, the red LED lights up and the access-denied melody plays.
+4. The fill light (COB) is automatically adjusted via a closed-loop LDR circuit, maintaining stable facial illumination even in dark environments.
+5. When the deep sleep switch is closed, the system enters an ultra-low power state and the lock remains engaged; it wakes up automatically when the switch is opened.
+6. ESP32 IP settings and access logs are saved locally in the browser (`LocalStorage`), preserving the history even after the page is reloaded.
 
 ---
 
-## 📁 Estrutura do Repositório
+## 📚 Libraries and Development Environment
+
+The firmware was developed using the Arduino IDE (ESP32 Core 2.0.14), with the environment configured for the **ESP32-S3** board (OPI PSRAM enabled, "Huge APP" partition scheme). Key libraries used:
+
+- `eloquent_esp32cam.h` — camera capture and high-level pipeline for ESP32-CAM/S3.
+- `eloquent_esp32cam/face/detection.h` — face detection.
+- `eloquent_esp32cam/face/recognition.h` — face recognition (registration, comparison, and similarity voting).
+- `WiFi.h` — local network connection.
+- `esp_http_server.h` — native ESP-IDF HTTP server (lighter than `WebServer.h`), used for API routes and the MJPEG stream.
+- `ESP32Servo.h` — control of the lock's servo motor.
+- `ESPmDNS.h` — device discovery on the local network via `FaceGuard.local`.
+- `driver/rtc_io.h` / `esp_sleep.h` — configuration of the wake-up pin and deep sleep mode.
+
+> The code was based on the **Freenove ESP32-S3-WROOM CAM** board with the **OV2640** sensor. ---
+
+## 📁 Repository Structure
 
 ```
 FaceGuard/
-├── reconhecimento_facial/   # Firmware do ESP32-S3 (Back-End) — câmera, detecção, reconhecimento e controle da fechadura
+├── reconhecimento_facial/   # ESP32-S3 Firmware (Back-End) — camera, detection, recognition, and lock control
 │   ├── reconhecimento_facial.ino
-│   ├── dashboard.h          # HTML/CSS/JS da página de debug embarcada na placa
-│   └── partitions.csv       # esquema de partições (Huge APP)
-├── dashboard/                # Interface Web (Front-End) — stream, controle e logs
+│   ├── dashboard.h          # HTML/CSS/JS for the debug page embedded on the board
+│   └── partitions.csv       # Partition scheme (Huge APP)
+├── dashboard/                # Web Interface (Front-End) — stream, control, and logs
 │   ├── index.html
 │   ├── app.js
 │   ├── style.css
 │   └── dashboard preview.jpg
-├── modelo 3d/                 # Arquivos de modelagem 3D do case (.stl, capturas e esboços)
+├── modelo 3d/                 # 3D modeling files for the case (.stl, screenshots, and sketches)
 │   ├── Face Guard.stl
 │   ├── esboço 3d.stl
 │   ├── esboço 3d.html
@@ -130,25 +123,25 @@ FaceGuard/
 
 ---
 
-## 🚀 Como Utilizar
+## 🚀 How to Use
 
-1. Faça o upload do código presente em `reconhecimento_facial/reconhecimento_facial.ino` para a placa ESP32-S3-WROOM CAM através da IDE do Arduino (Core 2.0.14, OPI PSRAM, partição Huge APP).
-2. Anote o endereço IP exibido no Monitor Serial quando o ESP32 se conectar ao Wi-Fi (ou use `FaceGuard.local` via mDNS).
-3. Abra o arquivo `dashboard/index.html` em qualquer navegador moderno.
-4. Na barra superior, digite o endereço IP (ou `FaceGuard.local`) do seu ESP32 e clique em **Conectar**.
-5. Cadastre os rostos autorizados pela aba de gerenciamento de rostos do Dashboard.
-6. Aproveite as funcionalidades do sistema controlando a câmera e a fechadura diretamente pelo Dashboard!
+1. Upload the code found in `reconhecimento_facial/reconhecimento_facial.ino` to the ESP32-S3-WROOM CAM board using the Arduino IDE (Core 2.0.14, OPI PSRAM, Huge APP partition).
+2. Note the IP address displayed in the Serial Monitor when the ESP32 connects to Wi-Fi (or use `FaceGuard.local` via mDNS).
+3. Open the `dashboard/index.html` file in any modern web browser.
+4. In the top bar, enter your ESP32's IP address (or `FaceGuard.local`) and click **Connect**.
+5. Register authorized faces using the Dashboard's face management tab.
+6. Enjoy the system's features by controlling the camera and lock directly from the Dashboard!
 
 ---
 
-## 👥 Equipe e Créditos
+## 👥 Team and Credits
 
-| Integrante | Responsabilidade | GitHub | Contato |
+| Member | Responsibility | GitHub | Contact |
 |---|---|---|---|
-| **Raul Jesus dos Santos** | Desenvolvimento Front-End — construção do Dashboard do FaceGuard | [@Raul-76](https://github.com/Raul-76) | [Email](raul.js.fla@gmail.com) |
-| **Carlos Eduardo Guimarães** | Modelagem 3D do case da câmera/sistema | [@VoIkmer](https://github.com/VoIkmer) | [Email](cguimaraes03@gmail.com) |
-| **Caio Marcelo Mazza** | Back-End — firmware do ESP32-S3 (câmera, reconhecimento facial e controle da fechadura) | [@Caiompmazza](https://github.com/caiompmazza) | [Email](caio.mpmazza@gmail.com) |
+| **Raul Jesus dos Santos** | Front-End Development — building the FaceGuard Dashboard | [@Raul-76](https://github.com/Raul-76) | [Email](raul.js.fla@gmail.com) |
+| **Carlos Eduardo Guimarães** | 3D modeling of the camera/system enclosure | [@VoIkmer](https://github.com/VoIkmer) | [Email](cguimaraes03@gmail.com) |
+| **Caio Marcelo Mazza** | Back-End — ESP32-S3 firmware (camera, facial recognition, and lock control) | [@Caiompmazza](https://github.com/caiompmazza) | [Email](caio.mpmazza@gmail.com) |
 
 ---
 
-Projeto concluído de controle de acesso local via hardware embarcado + Web, combinando reconhecimento facial, fechadura motorizada e uma interface de monitoramento em tempo real.
+Completed local access control project using embedded hardware and a web interface, combining facial recognition, a motorized lock, and a real-time monitoring interface.
