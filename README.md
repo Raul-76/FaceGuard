@@ -64,6 +64,11 @@ The enclosure was custom-designed to house the ESP32-S3, the servo-operated lock
 <img src="modelo 3d/Modelo 3D Final - 2.png" alt="3D model of the FaceGuard case - View 2" width="500"/>
 </p>
 
+<p align="center">
+<img src="modelo 3d/Modelo 3D Final -3.png" alt="3D model of the Servo Motor case" width="500"/>
+</p>
+
+
 ---
 
 ## ⚙️ How It Works
