@@ -23,6 +23,8 @@ Recognition decisions are not based on a single frame; instead, each access atte
 - **Green LED** — indicates **Access Granted**.
 - **Red LED** — indicates **Access Denied**.
 - **Blue LED ("breathing" RGB effect)** — indicates the system is processing a recognition attempt.
+- **COB Led strip** — dynamic lighting, for low brightness environment.
+- **LDR** — sensor used to determine the dutycycle fed to the led strip.
 - **Buzzer** — plays distinct melodies for access granted, access denied, alarm/tamper alerts, and system startup. - **LDR (Photoresistor)** — closed-loop light sensor: automatically adjusts the brightness of an auxiliary light (COB via MOSFET) to maintain stable facial illumination during recognition.
 - **Physical button** — manually triggers a recognition attempt.
 - **Deep Sleep switch** — puts the system into ultra-low power mode; the board wakes up automatically when the switch is toggled.
