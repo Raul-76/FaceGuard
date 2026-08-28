@@ -1,4 +1,4 @@
-# 🔐 FaceGuard — Smart Lock with Facial Recognition (ESP32-S3)
+# 🔐 FaceGuard - Smart Lock with Facial Recognition (ESP32-S3)
 
 ![ESP32-S3](https://img.shields.io/badge/ESP32--S3-firmware-E7352C?logo=espressif&logoColor=white)
 ![C++](https://img.shields.io/badge/C%2B%2B-00599C?logo=cplusplus&logoColor=white)
@@ -8,7 +8,7 @@
 
 This project implements a **facial recognition security lock** built around an **ESP32-S3 board (Freenove ESP32-S3-WROOM CAM, OV2640 sensor)**. The system comprises three components: embedded firmware (handling computer vision and lock control), a web dashboard for monitoring and control, and a custom 3D-printed enclosure.
 
-**- Video presentation:** A full walkthrough of the project (team introduction, live demo, and the challenges we faced) is available [on YouTube](https://youtu.be/lPA_LZTQk2s).
+**Video presentation:** A full walkthrough of the project (team introduction, live demo, and the challenges we faced) is available [on YouTube](https://youtu.be/lPA_LZTQk2s).
 
 ---
 
