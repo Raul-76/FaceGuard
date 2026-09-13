@@ -20,6 +20,8 @@ Recognition decisions are not based on a single frame; instead, each access atte
 
 ### 🔧 Hardware Used
 
+<!-- Schematic --> <p align="center"> <img src="docs/schematic.jpg" alt="FaceGuard schematic" width="700"/> </p>
+
 - **ESP32-S3 (Freenove ESP32-S3-WROOM CAM, OV2640)** — image capture and facial recognition processing.
 - **Servo Motor** — physically locks/unlocks the mechanism at the end of each access attempt.
 - **Green LED** — indicates **Access Granted**.
@@ -31,6 +33,35 @@ Recognition decisions are not based on a single frame; instead, each access atte
 - **Physical button** — manually triggers a recognition attempt.
 - **Deep Sleep switch** — puts the system into ultra-low power mode; the board wakes up automatically when the switch is toggled.
 - **3D-printed case** — custom enclosure designed to house the camera and other electronic components.
+
+---
+## The Firmware
+
+The firmware is written in C++ on the Arduino framework and uses EloquentEsp32cam for face detection, recognition and enrollment, ESP32Servo (adapted for the ESP32-S3) for the latch, and esp_http_server for the web interface. It runs face recognition entirely on the board, with no server or cloud service involved.
+
+<!-- Firmware architecture diagram -->
+<p align="center">
+  <img src="docs/firmware-architecture.jpg" alt="FaceGuard firmware architecture" width="700"/>
+</p>
+
+### Architecture
+
+- **Dual-Core Task Separation:** FreeRTOS splits the workload across both cores. Core 0 serves HTTP requests and the video stream, while core 1 runs the recognition pipeline, so that network traffic never stalls inference.
+- **Shared Frame Buffer:** Camera capture happens exclusively in the main loop, writing to a PSRAM buffer. The HTTP server only reads from it, guarded by a FreeRTOS mutex, which avoids frame buffer contention between recognition and streaming.
+- **Memory Configuration:** A Huge APP partition scheme and OPI PSRAM are required to fit the recognition model alongside the camera pipeline on the target board.
+- **Network Interfaces:** An MJPEG stream on port 81 and a REST endpoint on port 80, which serve the dashboard described above.
+
+### Recognition Pipeline
+
+<!-- Recognition decision flow -->
+<p align="center">
+  <img src="docs/recognition-flow.jpg" alt="FaceGuard recognition decision flow" width="700"/>
+</p>
+
+- **K-of-N Voting:** A decision layer sits around the model. Instead of unlocking on a single frame, the firmware requires agreement across consecutive frames, which reduces both false accepts and false rejects caused by momentary bad frames.
+- **Multi-Sample Enrollment:** A user can be enrolled from several captures, covering a wider region of the embedding space and improving recognition across angles and lighting.
+- **Quality Gating:** Captures that do not meet the quality criteria are rejected at enrollment, so that poor samples never enter the database.
+- **Illumination Control:** The LDR feedback loop adjusts illumination, keeping the face adequately lit before inference runs.
 
 ---
 
