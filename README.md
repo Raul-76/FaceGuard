@@ -6,7 +6,7 @@
 ![Status](https://img.shields.io/badge/Status-Conclu%C3%ADdo-brightgreen)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-<p align="center"> <img src="modelo 3d/foto-faceguard.png" alt="FaceGuard schematic" width="700"/> </p>
+<p align="center"> <img src="modelo 3d/foto-faceguard.jpeg" alt="FaceGuard schematic" width="500"/> </p>
 
 This project implements a **facial recognition security lock** built around an **ESP32-S3 board (Freenove ESP32-S3-WROOM CAM, OV2640 sensor)**. The system comprises three components: embedded firmware (handling computer vision and lock control), a web dashboard for monitoring and control, and a custom 3D-printed enclosure.
 
