@@ -41,7 +41,11 @@ The firmware is written in C++ on the Arduino framework and uses EloquentEsp32ca
 
 <!-- Firmware architecture diagram -->
 <p align="center">
-  <img src="docs/firmware-architecture.jpg" alt="FaceGuard firmware architecture" width="700"/>
+  <img src="docs/firmware-architecture1.jpg" alt="FaceGuard firmware architecture1" width="700"/>
+</p>
+
+<p align="center">
+  <img src="docs/firmware-architectur2e.jpg" alt="FaceGuard firmware architecture2" width="700"/>
 </p>
 
 ### Architecture
@@ -65,7 +69,7 @@ The firmware is written in C++ on the Arduino framework and uses EloquentEsp32ca
 
 ---
 
-## 📊 The Web Dashboard (FaceGuard)
+## The Web Dashboard (FaceGuard)
 
 The Dashboard (located in the `dashboard` folder) is a modern interface built using HTML, CSS (dark mode with glassmorphism), and JavaScript (Vanilla). It connects directly to the ESP32 camera via HTTP requests to view the live video stream and control the system.
 <!-- 📸 Print do Dashboard -->
@@ -87,7 +91,7 @@ The Dashboard (located in the `dashboard` folder) is a modern interface built us
 
 ---
 
-## 🖨️ 3D Model
+## 3D Model
 
 The enclosure was custom-designed to house the ESP32-S3, the servo-operated lock, and other electronic components, and was subsequently 3D printed. <!-- 📸 3D model screenshot/photo -->
 <p align="center">
