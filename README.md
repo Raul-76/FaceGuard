@@ -40,15 +40,6 @@ Recognition decisions are not based on a single frame; instead, each access atte
 
 The firmware is written in C++ on the Arduino framework and uses EloquentEsp32cam for face detection, recognition and enrollment, ESP32Servo (adapted for the ESP32-S3) for the latch, and esp_http_server for the web interface. It runs face recognition entirely on the board, with no server or cloud service involved.
 
-<!-- Firmware architecture diagram -->
-<p align="center">
-  <img src="docs/firmware-architecture1.jpg" alt="FaceGuard firmware architecture1" width="700"/>
-</p>
-
-<p align="center">
-  <img src="docs/firmware-architectur2e.jpg" alt="FaceGuard firmware architecture2" width="700"/>
-</p>
-
 ### Architecture
 
 - **Dual-Core Task Separation:** FreeRTOS splits the workload across both cores. Core 0 serves HTTP requests and the video stream, while core 1 runs the recognition pipeline, so that network traffic never stalls inference.
@@ -60,7 +51,11 @@ The firmware is written in C++ on the Arduino framework and uses EloquentEsp32ca
 
 <!-- Recognition decision flow -->
 <p align="center">
-  <img src="docs/recognition-flow.jpg" alt="FaceGuard recognition decision flow" width="700"/>
+  <img src="modelo 3d/Diagrama-votacao-temporal.png" alt="FaceGuard recognition decision flow" width="700"/>
+</p>
+
+<p align="center">
+  <img src="modelo 3d/diagrama_multiplo_cadastro.png" alt="FaceGuard recognition decision flow" width="700"/>
 </p>
 
 - **K-of-N Voting:** A decision layer sits around the model. Instead of unlocking on a single frame, the firmware requires agreement across consecutive frames, which reduces both false accepts and false rejects caused by momentary bad frames.
