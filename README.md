@@ -20,7 +20,8 @@ Recognition decisions are not based on a single frame; instead, each access atte
 
 ### 🔧 Hardware Used
 
-<!-- Schematic --> <p align="center"> <img src="docs/schematic.jpg" alt="FaceGuard schematic" width="700"/> </p>
+<!-- Schematic --> 
+<p align="center"> <img src="modelo 3d/esquematico circuito.png" alt="FaceGuard schematic" width="700"/> </p>
 
 - **ESP32-S3 (Freenove ESP32-S3-WROOM CAM, OV2640)** — image capture and facial recognition processing.
 - **Servo Motor** — physically locks/unlocks the mechanism at the end of each access attempt.
