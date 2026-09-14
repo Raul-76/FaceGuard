@@ -74,7 +74,7 @@ The Dashboard (located in the `dashboard` folder) is a modern interface built us
 
 <p align="center">
   <img src="dashboard/dashboard preview.jpg" alt="FaceGuard Dashboard" width="45%"/>
-  <img src="dashboard/dashboard_mobile.jpeg" alt="FaceGuard Dashboard on mobile" width="45%"/>
+  <img src="modelo 3d/dashboard_mobile.jpeg" alt="FaceGuard Dashboard on mobile" width="45%"/>
 </p>
 
 ### Key Features
