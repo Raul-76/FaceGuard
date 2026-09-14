@@ -69,10 +69,12 @@ The firmware is written in C++ on the Arduino framework and uses EloquentEsp32ca
 
 ## The Web Dashboard
 
-The Dashboard (located in the `dashboard` folder) is a modern interface built using HTML, CSS (dark mode with glassmorphism), and JavaScript (Vanilla). It connects directly to the ESP32 camera via HTTP requests to view the live video stream and control the system.
+The Dashboard (located in the `dashboard` folder) is a modern interface built using HTML, CSS (dark mode with glassmorphism), and JavaScript (Vanilla). It connects directly to the ESP32 camera via HTTP requests to view the live video stream and control the system. And it is accessible from both desktop and mobile browsers.
 <!-- 📸 Print do Dashboard -->
+
 <p align="center">
-  <img src="dashboard/dashboard preview.jpg" alt="Print do Dashboard FaceGuard" width="700"/>
+  <img src="dashboard/dashboard preview.jpg" alt="FaceGuard Dashboard" width="45%"/>
+  <img src="dashboard/dashboard_mobile.jpg" alt="FaceGuard Dashboard on mobile" width="45%"/>
 </p>
 
 ### Key Features
